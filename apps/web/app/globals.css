@@ -1,0 +1,456 @@
+@import "tailwindcss";
+
+/* ───────────────────────────────────────────────────────────
+   Polarsight design tokens
+   Light, airy and generous, with a single green action colour.
+   ─────────────────────────────────────────────────────────── */
+@theme {
+  --color-canvas: #080A10;
+  --color-paper: #10141D;
+  --color-sand: #171C27;
+
+  --color-ink: #F3F5F8;
+  --color-body: #9AA3B2;
+  --color-faint: #7E8898;
+
+  /* Brand accent. `accent` is for fills, indicators and marks;
+     `accent-ice` is the text-safe variant, since electric blue
+     does not clear 4.5:1 as small text on these surfaces;
+     `accent-strong` is the button fill that lets white labels
+     pass. All three are the same hue. */
+  --color-accent: #1677E8;
+  --color-accent-strong: #1369CD;
+  --color-accent-ice: #8CCFFF;
+  --color-accent-soft: #0C1C2E;
+
+  --color-line: #262C37;
+  --color-line-soft: #1A1F29;
+
+  /* Inverted surface: primary pills, active tabs, markers */
+  --color-invert: #F3F5F8;
+  --color-on-invert: #080A10;
+
+  /* Emphasis panel (the "why us" block), raised above the canvas */
+  --color-emph: #10141D;
+  --color-on-emph: #F3F5F8;
+  --color-on-emph-muted: rgba(243, 245, 248, 0.64);
+  --color-emph-line: rgba(255, 255, 255, 0.12);
+
+  /* A terminal is dark in both themes, so these never flip */
+  --color-terminal: #0C0F16;
+  --color-on-terminal: rgba(255, 255, 255, 0.86);
+
+  /* Glass used by the floating nav */
+  --color-glass: rgba(16, 20, 29, 0.84);
+  --color-glass-soft: rgba(16, 20, 29, 0.62);
+  --color-glass-line: rgba(255, 255, 255, 0.08);
+
+  /* Unrevealed word colour in the scroll reveal */
+  --color-scroll-dim: #5E6878;
+
+  --font-display: var(--font-michroma), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, monospace;
+
+  /* One radius scale. Three steps only: inner detail, card, panel. */
+  --radius-inner: 0.75rem;
+  --radius-card: 1.25rem;
+  --radius-panel: 1.75rem;
+  --radius-pill: 999px;
+
+  /* Layout. --nav-h is the measured height of the floating navbar
+     (16px top offset + 70px pill); the hero subtracts it so the first
+     screen belongs entirely to the hero. */
+  --nav-h: 86px;
+  --container-max: 1400px;
+  --container-gutter: 64px;
+
+  /* Layered shadows. Several low-opacity layers read as soft,
+     physical depth; a single hard shadow reads as cheap. */
+  --shadow-nav:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 6px 18px rgba(0, 0, 0, 0.35),
+    0 18px 44px rgba(0, 0, 0, 0.4);
+  --shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    0 4px 16px rgba(0, 0, 0, 0.3);
+  --shadow-lift:
+    0 2px 6px rgba(0, 0, 0, 0.3),
+    0 12px 28px rgba(0, 0, 0, 0.38),
+    0 28px 56px rgba(0, 0, 0, 0.32);
+  --shadow-pill:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 6px 18px rgba(0, 0, 0, 0.38);
+}
+
+html {
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 7rem;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Visible focus ring everywhere (WCAG 2.2) */
+  :focus-visible {
+    outline: 2px solid var(--color-accent-ice);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: #fff;
+  }
+}
+
+@layer utilities {
+  /* Monospace eyebrow label */
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-accent-ice);
+  }
+
+  /* Faint dot field used behind hero and closing sections */
+  .dotfield {
+    background-image: radial-gradient(
+      var(--color-line) 1px,
+      transparent 1px
+    );
+    background-size: 26px 26px;
+  }
+
+  /* ── Type scale ────────────────────────────────────────────
+     Every size is fluid, so the jump between breakpoints is the
+     same everywhere and the page keeps one rhythm. */
+  .t-display {
+    font-family: var(--font-display);
+    font-size: clamp(1.625rem, 3.2vw, 2.75rem);
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+    font-weight: 400;
+  }
+
+  .t-h2 {
+    font-family: var(--font-display);
+    font-size: clamp(1.125rem, 2.05vw, 1.75rem);
+    line-height: 1.32;
+    letter-spacing: -0.005em;
+    font-weight: 400;
+  }
+
+  .t-h3 {
+    font-family: var(--font-display);
+    font-size: clamp(0.875rem, 1.05vw, 1rem);
+    line-height: 1.45;
+    letter-spacing: 0;
+    font-weight: 400;
+  }
+
+  .t-lead {
+    font-size: clamp(1rem, 1.15vw, 1.125rem);
+    line-height: 1.65;
+  }
+
+  .t-body {
+    font-size: 0.9375rem;
+    line-height: 1.65;
+  }
+
+  .t-label {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  /* ── Surfaces ──────────────────────────────────────────────
+     Two surface types across the whole page: card and panel.
+     Same border, same shadow family, only the scale differs. */
+  .surface-card {
+    background-color: var(--color-paper);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .surface-panel {
+    background-color: var(--color-paper);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-card);
+  }
+
+  .lift {
+    transition: box-shadow 300ms ease, transform 300ms ease;
+  }
+
+  .lift:hover {
+    box-shadow: var(--shadow-lift);
+    transform: translateY(-2px);
+  }
+
+  /* ── Container ─────────────────────────────────────────────
+     Single source of truth for page width. Mobile and tablet use
+     padding; from 1024px up the container insets by a fixed gutter
+     and caps at --container-max. */
+  .container-page {
+    width: 100%;
+    max-width: var(--container-max);
+    margin-inline: auto;
+    padding-inline: 18px;
+  }
+
+  @media (min-width: 768px) {
+    .container-page {
+      padding-inline: 24px;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container-page {
+      width: calc(100% - var(--container-gutter));
+      padding-inline: 0;
+    }
+  }
+
+  /* ── Hero ──────────────────────────────────────────────────
+     Owns the whole first screen. min-height is the full small
+     viewport height, and the navbar height is taken out as padding,
+     so the usable content area is exactly 100svh - --nav-h and the
+     next section starts at the fold rather than above it. */
+  .hero-section {
+    position: relative;
+    isolation: isolate;
+    display: grid;
+    align-content: center;
+    margin-top: var(--nav-h);
+    /* Below the two-column breakpoint the hero stacks, and the stacked
+       content is already taller than a phone screen. Forcing a
+       full-screen minimum there only strands the mark below the fold,
+       so the height is left to the content. */
+    padding-block: 1.25rem;
+  }
+
+  @media (min-width: 1024px) {
+    .hero-section {
+      /* The hero box starts below the navbar and is exactly the rest
+         of the first screen, so its bottom edge lands on the fold and
+         the next section begins there rather than above it. */
+      min-height: calc(100svh - var(--nav-h));
+      padding-block: 2rem;
+    }
+  }
+
+  /* Hero grid. Declared here rather than as a Tailwind arbitrary
+     value: `grid-cols-[48fr_52fr]` is silently dropped, because a
+     bare integer in that utility is read as a column count. */
+  .hero-grid {
+    display: grid;
+    align-items: center;
+    gap: 1.75rem;
+  }
+
+  @media (min-width: 640px) {
+    .hero-grid {
+      gap: 3rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .hero-grid {
+      grid-template-columns: 48fr 52fr;
+      gap: 2.5rem;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .hero-grid {
+      gap: 3.5rem;
+    }
+  }
+
+  /* Dedicated background layer, so the pattern covers the hero edge
+     to edge regardless of the content's height. */
+  .hero-dots {
+    position: absolute;
+    /* Extended upward by the navbar height so the pattern runs behind
+       the floating navbar instead of starting beneath it. */
+    inset: calc(-1 * var(--nav-h)) 0 0 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: radial-gradient(var(--color-line) 1px, transparent 1px);
+    background-size: 26px 26px;
+    /* Fades out just before the fold so the pattern does not stop on
+       a hard line where the next section begins. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 90%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 90%, transparent 100%);
+  }
+
+  .hairline {
+    background-image: linear-gradient(
+      to right,
+      transparent,
+      var(--color-line),
+      transparent
+    );
+  }
+}
+
+@keyframes ps-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+@keyframes ps-scan {
+  0%   { opacity: 0.15; }
+  50%  { opacity: 0.55; }
+  100% { opacity: 0.15; }
+}
+
+@keyframes ps-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ───────────────────────────────────────────────────────────
+   3D emblem in the hero.
+   The rig swings rather than fully spinning, so the mark always
+   reads as a star while still showing its extruded depth.
+   ─────────────────────────────────────────────────────────── */
+@keyframes ps-rig {
+  0%, 100% { transform: rotateY(-30deg); }
+  50%      { transform: rotateY(30deg); }
+}
+
+@keyframes ps-wobble {
+  0%, 100% { transform: rotateX(-15deg) translateY(6px); }
+  50%      { transform: rotateX(-7deg) translateY(-10px); }
+}
+
+@keyframes ps-ring-a {
+  from { transform: rotateX(74deg) rotateZ(0deg); }
+  to   { transform: rotateX(74deg) rotateZ(360deg); }
+}
+
+@keyframes ps-ring-b {
+  from { transform: rotateY(68deg) rotateZ(0deg); }
+  to   { transform: rotateY(68deg) rotateZ(-360deg); }
+}
+
+@keyframes ps-ring-c {
+  from { transform: rotateX(30deg) rotateY(46deg) rotateZ(0deg); }
+  to   { transform: rotateX(30deg) rotateY(46deg) rotateZ(360deg); }
+}
+
+@keyframes ps-shadow {
+  0%, 100% { transform: translateX(-50%) scale(1);    opacity: 0.16; }
+  50%      { transform: translateX(-50%) scale(0.86); opacity: 0.09; }
+}
+
+/* Idle motion for the hero mark, running whenever the pointer is away */
+@keyframes ps-sway {
+  0%, 100% { transform: rotateY(-7deg) rotateX(2deg); }
+  50%      { transform: rotateY(7deg) rotateX(-2deg); }
+}
+
+@keyframes ps-twinkle {
+  0%, 100% { opacity: 0.9; transform: scale(1); }
+  45%      { opacity: 1; transform: scale(1.06); }
+}
+
+/* ───────────────────────────────────────────────────────────
+   Cursor
+   A four-pointed sparkle taken from the star in the mark. The
+   interactive state swaps to a larger green star inside a ring,
+   so clickability is still signalled, not just decoration.
+   Pointer devices only; touch keeps the platform default.
+   ─────────────────────────────────────────────────────────── */
+@media (hover: hover) and (pointer: fine) {
+  html,
+  body {
+    cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2222%22%20height%3D%2222%22%20viewBox%3D%220%200%2022%2022%22%3E%3Cpath%20d%3D%22M11.0%201.3199999999999998%20C11.55%207.48%2014.520000000000001%2010.45%2020.68%2011.0%20C14.520000000000001%2011.55%2011.55%2014.520000000000001%2011.0%2020.68%20C10.45%2014.520000000000001%207.48%2011.55%201.3199999999999998%2011.0%20C7.48%2010.45%2010.45%207.48%2011.0%201.3199999999999998%20Z%22%20fill%3D%22%23CFE6FA%22%20stroke%3D%22%23080A10%22%20stroke-width%3D%220.9%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E") 11 11, auto;
+  }
+
+  a,
+  button,
+  [role="tab"],
+  summary,
+  label,
+  [onclick],
+  .lift {
+    cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2228%22%20height%3D%2228%22%20viewBox%3D%220%200%2028%2028%22%3E%3Ccircle%20cx%3D%2214.0%22%20cy%3D%2214.0%22%20r%3D%2212.8%22%20fill%3D%22none%22%20stroke%3D%22%231677E8%22%20stroke-opacity%3D%220.55%22%20stroke-width%3D%221%22%2F%3E%3Cpath%20d%3D%22M14.0%201.68%20C14.700000000000001%209.520000000000001%2018.48%2013.299999999999999%2026.32%2014.0%20C18.48%2014.700000000000001%2014.700000000000001%2018.48%2014.0%2026.32%20C13.299999999999999%2018.48%209.520000000000001%2014.700000000000001%201.68%2014.0%20C9.520000000000001%2013.299999999999999%2013.299999999999999%209.520000000000001%2014.0%201.68%20Z%22%20fill%3D%22%238CCFFF%22%20stroke%3D%22%23080A10%22%20stroke-width%3D%220.9%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E") 14 14, pointer;
+  }
+
+  :disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
+/* Soft glow that trails the pointer */
+.cursor-glow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0;
+  background: radial-gradient(
+    circle,
+    rgba(22, 119, 232, 0.55),
+    rgba(140, 207, 255, 0.14) 45%,
+    transparent 70%
+  );
+  transition: opacity 250ms ease, width 220ms ease, height 220ms ease,
+    margin 220ms ease;
+  will-change: transform;
+}
+
+.cursor-glow[data-active="true"] {
+  opacity: 1;
+}
+
+.cursor-glow[data-hot="true"] {
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .cursor-glow {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor-glow {
+    display: none;
+  }
+}

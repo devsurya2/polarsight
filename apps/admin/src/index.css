@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+/* POLARSIGHT admin palette. Same tokens as the public site, so the
+   two read as one product. */
+@theme {
+  --color-canvas: #080A10;
+  --color-panel: #10141D;
+  --color-raised: #171C27;
+
+  --color-ink: #F3F5F8;
+  --color-body: #9AA3B2;
+  --color-faint: #7E8898;
+
+  --color-accent: #1677E8;
+  --color-accent-strong: #1369CD;
+  --color-accent-ice: #8CCFFF;
+  --color-accent-soft: #0C1C2E;
+
+  --color-line: #262C37;
+  --color-line-soft: #1A1F29;
+
+  --color-danger: #E8556A;
+  --color-danger-soft: #2A1016;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
+
+  --radius-inner: 0.5rem;
+  --radius-card: 0.75rem;
+}
+
+@layer base {
+  html { color-scheme: dark; }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent-ice);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection { background: var(--color-accent); color: #fff; }
+
+  /* Dark scrollbars, so the chrome matches the interface */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--color-canvas); }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 99px;
+    border: 2px solid var(--color-canvas);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-line-soft); }
+}
+
+@layer utilities {
+  .panel {
+    background-color: var(--color-panel);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+  }
+
+  .label {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-faint);
+  }
+
+  .field {
+    width: 100%;
+    background-color: var(--color-canvas);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-inner);
+    padding: 0.55rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--color-ink);
+    transition: border-color 150ms ease;
+  }
+  .field:hover { border-color: #313947; }
+  .field:focus { border-color: var(--color-accent); outline: none; }
+  .field::placeholder { color: var(--color-faint); }
+  .field:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

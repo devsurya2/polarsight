@@ -1,0 +1,372 @@
+// POLARSIGHT database schema
+//
+// Conventions used throughout:
+//  - every table carries createdAt / updatedAt
+//  - anything filtered, sorted or looked up is indexed
+//  - deletes that would orphan rows are restricted, not cascaded,
+//    except where the child has no meaning without its parent
+//  - media binaries live in object storage; only metadata is here
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Access control
+// ─────────────────────────────────────────────────────────────
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String @map("password_hash")
+  name         String
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+
+  // Failed-login tracking, used to lock an account out temporarily
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until")
+
+  roleId String @map("role_id")
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+  enquiryNotes  EnquiryNote[]
+  uploads       MediaAsset[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([roleId])
+  @@index([isActive])
+  @@map("admin_users")
+}
+
+model Role {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+
+  // A system role cannot be deleted or renamed through the API
+  isSystem Boolean @default(false) @map("is_system")
+
+  users       AdminUser[]
+  permissions RolePermission[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(cuid())
+  // Capability key, e.g. "programme:write"
+  key         String  @unique
+  description String?
+  // Grouping for the admin interface, e.g. "Programmes"
+  group       String
+
+  roles RolePermission[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([group])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+// Refresh tokens are stored hashed so a database leak cannot be
+// replayed. Rotation replaces a row and marks the old one used;
+// reuse of a used token revokes the whole family.
+model RefreshToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique @map("token_hash")
+  familyId  String @map("family_id")
+  userId    String @map("user_id")
+  user      AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  ip        String?
+  userAgent String? @map("user_agent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Website content
+// ─────────────────────────────────────────────────────────────
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Programme {
+  id      String @id @default(cuid())
+  slug    String @unique
+  code    String @unique // e.g. TRK-01
+  name    String
+  tag     String // e.g. "Security Operations"
+  summary String
+  body    String?
+
+  durationWeeks Int? @map("duration_weeks")
+  level         String?
+
+  // Bullet points shown on the card
+  points String[]
+
+  status      PublishStatus @default(DRAFT)
+  publishedAt DateTime? @map("published_at")
+  sortOrder   Int           @default(0) @map("sort_order")
+
+  imageId String? @map("image_id")
+  image   MediaAsset? @relation(fields: [imageId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, sortOrder])
+  @@index([imageId])
+  @@map("programmes")
+}
+
+enum ContentType {
+  TEXT
+  RICH_TEXT
+  JSON
+}
+
+// Keyed blocks of marketing copy, e.g. "hero.headline".
+model WebsiteContent {
+  id      String      @id @default(cuid())
+  key     String      @unique
+  section String // grouping for the admin UI, e.g. "hero"
+  label   String // human label shown to an editor
+  type    ContentType @default(TEXT)
+  value   String // plain text, rich text, or serialised JSON
+
+  status    PublishStatus @default(PUBLISHED)
+  sortOrder Int           @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([section, sortOrder])
+  @@index([status])
+  @@map("website_content")
+}
+
+model Statistic {
+  id    String @id @default(cuid())
+  key   String @unique
+  label String
+  value String
+
+  status    PublishStatus @default(DRAFT)
+  sortOrder Int           @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, sortOrder])
+  @@map("statistics")
+}
+
+model Audience {
+  id      String  @id @default(cuid())
+  slug    String  @unique
+  name    String
+  heading String
+  blurb   String
+  outcome String?
+  bullets String[]
+
+  status    PublishStatus @default(DRAFT)
+  sortOrder Int           @default(0) @map("sort_order")
+
+  imageId String? @map("image_id")
+  image   MediaAsset? @relation(fields: [imageId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, sortOrder])
+  @@index([imageId])
+  @@map("audiences")
+}
+
+model CareerContent {
+  id    String @id @default(cuid())
+  key   String @unique
+  title String
+  body  String
+
+  status    PublishStatus @default(DRAFT)
+  sortOrder Int           @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, sortOrder])
+  @@map("career_content")
+}
+
+model FAQ {
+  id       String @id @default(cuid())
+  question String
+  answer   String
+  category String?
+
+  status    PublishStatus @default(DRAFT)
+  sortOrder Int           @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, sortOrder])
+  @@map("faqs")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Enquiries
+// ─────────────────────────────────────────────────────────────
+
+enum EnquiryStatus {
+  NEW
+  IN_PROGRESS
+  CONTACTED
+  CLOSED
+  SPAM
+}
+
+model Enquiry {
+  id           String  @id @default(cuid())
+  name         String
+  email        String
+  phone        String?
+  organisation String?
+  subject      String?
+  message      String
+
+  status EnquiryStatus @default(NEW)
+
+  // Captured for abuse investigation, not shown in the UI
+  sourceIp  String? @map("source_ip")
+  userAgent String? @map("user_agent")
+
+  notes EnquiryNote[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([email])
+  @@index([createdAt])
+  @@map("enquiries")
+}
+
+model EnquiryNote {
+  id      String  @id @default(cuid())
+  body    String
+
+  enquiryId String @map("enquiry_id")
+  enquiry   Enquiry @relation(fields: [enquiryId], references: [id], onDelete: Cascade)
+
+  authorId String? @map("author_id")
+  author   AdminUser? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([enquiryId])
+  @@index([authorId])
+  @@map("enquiry_notes")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Media and audit
+// ─────────────────────────────────────────────────────────────
+
+// Binary data is never stored here. storageKey points at the object
+// in whichever storage driver is configured.
+model MediaAsset {
+  id           String  @id @default(cuid())
+  filename     String
+  originalName String @map("original_name")
+  mimeType     String @map("mime_type")
+  sizeBytes    Int @map("size_bytes")
+  storageKey   String  @unique @map("storage_key")
+  url          String
+  width        Int?
+  height       Int?
+  alt          String?
+  checksum     String?
+
+  uploadedById String? @map("uploaded_by_id")
+  uploadedBy   AdminUser? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  programmes Programme[]
+  audiences  Audience[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([uploadedById])
+  @@index([mimeType])
+  @@index([createdAt])
+  @@map("media_assets")
+}
+
+model AuditLog {
+  id     String @id @default(cuid())
+  action String // e.g. "programme.update"
+  entity String // e.g. "Programme"
+  entityId String? @map("entity_id")
+
+  // Snapshots either side of the change, for investigation
+  before Json?
+  after  Json?
+
+  actorId String? @map("actor_id")
+  actor   AdminUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  ip        String?
+  userAgent String? @map("user_agent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

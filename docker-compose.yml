@@ -1,0 +1,32 @@
+# POLARSIGHT local infrastructure.
+#
+# This Postgres is dedicated to the project. It runs on 5433 and uses
+# its own credentials and its own named volume, so it cannot collide
+# with or alter any PostgreSQL already installed on the host.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: polarsight-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-polarsight}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-polarsight}
+      # Fail fast rather than silently accepting weak auth
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports:
+      # Host 5433 on purpose: 5432 may belong to a system install.
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - polarsight-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-polarsight} -d ${POSTGRES_DB:-polarsight}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  polarsight-pgdata:
+    name: polarsight-pgdata
