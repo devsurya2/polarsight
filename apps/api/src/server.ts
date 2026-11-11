@@ -1,3 +1,4 @@
+
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { logger } from "./lib/logger.js";
@@ -9,16 +10,32 @@ async function main() {
   logger.info("database reachable");
 
   const app = createApp();
-  const server = app.listen(env.API_PORT, () => {
-    logger.info(`POLARSIGHT API listening on http://localhost:${env.API_PORT}`);
+
+  // Render supplies PORT dynamically. Use API_PORT for local development.
+  const port = Number(process.env.PORT ?? env.API_PORT);
+
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error("Invalid API port configuration");
+  }
+
+  // Bind to all network interfaces so Render can reach the service.
+  const server = app.listen(port, "0.0.0.0", () => {
+    logger.info(`POLARSIGHT API listening on port ${port}`);
   });
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "shutting down");
-    server.close(async () => {
+
+    server.close(async (error) => {
+      if (error) {
+        logger.error({ error }, "error closing HTTP server");
+        process.exitCode = 1;
+      }
+
       await prisma.$disconnect();
-      process.exit(0);
+      process.exit();
     });
+
     // Do not hang forever on a stuck connection.
     setTimeout(() => process.exit(1), 10_000).unref();
   };

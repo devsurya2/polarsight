@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "dotenv -e ../../.env -- tsx watch src/server.ts",
     "build": "rm -rf dist && tsc -p tsconfig.json",
-    "start": "dotenv -e ../../.env -- node dist/server.js",
+    "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --ext .ts",
     "db:generate": "dotenv -e ../../.env -- prisma generate",
