@@ -53,10 +53,32 @@ const BASE = "/api";
 
 let refreshing: Promise<boolean> | null = null;
 let onSessionLost: (() => void) | null = null;
+let onReauthRequired: (() => Promise<boolean>) | null = null;
+let reauthing: Promise<boolean> | null = null;
 
 /** Lets the auth provider react when the session cannot be recovered. */
 export function setSessionLostHandler(fn: (() => void) | null): void {
   onSessionLost = fn;
+}
+
+/**
+ * Lets the re-authentication prompt take over when the API asks for a
+ * fresh password before a sensitive action. The handler resolves true
+ * once the user has confirmed, and the original request is retried.
+ */
+export function setReauthHandler(fn: (() => Promise<boolean>) | null): void {
+  onReauthRequired = fn;
+}
+
+async function attemptReauth(): Promise<boolean> {
+  if (!onReauthRequired) return false;
+  // One prompt at a time, shared by every request that hit the gate.
+  reauthing ??= onReauthRequired().finally(() => {
+    setTimeout(() => {
+      reauthing = null;
+    }, 0);
+  });
+  return reauthing;
 }
 
 async function attemptRefresh(): Promise<boolean> {
@@ -128,6 +150,14 @@ async function request<T>(path: string, opts: RequestOptions = {}, retry = true)
     throw await toError(res);
   }
 
+  if (res.status === 403 && retry) {
+    const err = await toError(res);
+    if (err.code === "REAUTH_REQUIRED" && (await attemptReauth())) {
+      return request<T>(path, opts, false);
+    }
+    throw err;
+  }
+
   if (!res.ok) throw await toError(res);
 
   if (res.status === 204) return undefined as T;
@@ -149,8 +179,13 @@ export const api = {
 };
 
 /** Streams a file download through the session, then saves it. */
-export async function download(path: string, filename: string): Promise<void> {
+export async function download(path: string, filename: string, retry = true): Promise<void> {
   const res = await fetch(`${BASE}${path}`, { credentials: "include" });
+  if (res.status === 403 && retry) {
+    const err = await toError(res);
+    if (err.code === "REAUTH_REQUIRED" && (await attemptReauth())) return download(path, filename, false);
+    throw err;
+  }
   if (!res.ok) throw await toError(res);
 
   const blob = await res.blob();

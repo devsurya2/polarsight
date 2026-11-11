@@ -1,42 +1,72 @@
 @import "tailwindcss";
 
-/* POLARSIGHT admin palette. Same tokens as the public site, so the
-   two read as one product. */
+/* POLARSIGHT admin.
+   The same palette as the public site, so the two read as one product.
+   Dark only: this is an operations console, used for long stretches,
+   and a consistent surface is easier to scan than a theme toggle. */
 @theme {
-  --color-canvas: #080A10;
-  --color-panel: #10141D;
-  --color-raised: #171C27;
+  /* Surfaces, darkest to lightest */
+  --color-canvas: #080a10;
+  --color-sunken: #05070b;
+  --color-panel: #10141d;
+  --color-raised: #171c27;
+  --color-overlay: #1b212d;
 
-  --color-ink: #F3F5F8;
-  --color-body: #9AA3B2;
-  --color-faint: #7E8898;
+  /* Text */
+  --color-ink: #f3f5f8;
+  --color-body: #9aa3b2;
+  --color-faint: #6f7987;
 
-  --color-accent: #1677E8;
-  --color-accent-strong: #1369CD;
-  --color-accent-ice: #8CCFFF;
-  --color-accent-soft: #0C1C2E;
+  /* Brand */
+  --color-accent: #1677e8;
+  --color-accent-strong: #1369cd;
+  --color-accent-ice: #8ccfff;
+  --color-accent-soft: #0c1c2e;
 
-  --color-line: #262C37;
-  --color-line-soft: #1A1F29;
+  /* Borders */
+  --color-line: #262c37;
+  --color-line-soft: #1a1f29;
+  --color-line-strong: #39414f;
 
-  --color-danger: #E8556A;
-  --color-danger-soft: #2A1016;
+  /* Status. Muted on purpose: a dashboard that shouts at you
+     stops being readable. */
+  --color-positive: #35b37e;
+  --color-positive-soft: #0d1f18;
+  --color-caution: #d9a23b;
+  --color-caution-soft: #231a0c;
+  --color-danger: #e8556a;
+  --color-danger-soft: #2a1016;
+  --color-info: #5b8def;
+  --color-info-soft: #101828;
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
 
   --radius-inner: 0.5rem;
   --radius-card: 0.75rem;
+
+  /* One shared easing, so motion feels like one system */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @layer base {
-  html { color-scheme: dark; }
+  html {
+    color-scheme: dark;
+  }
 
   body {
     background-color: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Tabular figures everywhere numbers are compared, so columns of
+     counts line up instead of wobbling. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
   }
 
   :focus-visible {
@@ -45,17 +75,34 @@
     border-radius: 4px;
   }
 
-  ::selection { background: var(--color-accent); color: #fff; }
+  ::selection {
+    background: var(--color-accent);
+    color: #fff;
+  }
 
-  /* Dark scrollbars, so the chrome matches the interface */
-  ::-webkit-scrollbar { width: 10px; height: 10px; }
-  ::-webkit-scrollbar-track { background: var(--color-canvas); }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-canvas);
+  }
   ::-webkit-scrollbar-thumb {
     background: var(--color-line);
     border-radius: 99px;
     border: 2px solid var(--color-canvas);
   }
-  ::-webkit-scrollbar-thumb:hover { background: var(--color-line-soft); }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-line-strong);
+  }
+
+  /* Native date and time pickers render a near-black icon on a dark
+     field, which is invisible. */
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.7);
+    cursor: pointer;
+  }
 }
 
 @layer utilities {
@@ -65,12 +112,25 @@
     border-radius: var(--radius-card);
   }
 
+  .panel-sunken {
+    background-color: var(--color-sunken);
+    border: 1px solid var(--color-line-soft);
+    border-radius: var(--radius-inner);
+  }
+
+  /* The small monospace caps used for section labels and keys */
   .label {
     font-family: var(--font-mono);
     font-size: 0.6875rem;
+    line-height: 1.2;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--color-faint);
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
   }
 
   .field {
@@ -78,20 +138,87 @@
     background-color: var(--color-canvas);
     border: 1px solid var(--color-line);
     border-radius: var(--radius-inner);
-    padding: 0.55rem 0.75rem;
+    padding: 0.5rem 0.75rem;
     font-size: 0.875rem;
+    line-height: 1.5;
     color: var(--color-ink);
-    transition: border-color 150ms ease;
+    transition:
+      border-color 150ms var(--ease-out),
+      background-color 150ms var(--ease-out);
   }
-  .field:hover { border-color: #313947; }
-  .field:focus { border-color: var(--color-accent); outline: none; }
-  .field::placeholder { color: var(--color-faint); }
-  .field:disabled { opacity: 0.5; cursor: not-allowed; }
+  .field:hover:not(:disabled) {
+    border-color: var(--color-line-strong);
+  }
+  .field:focus {
+    border-color: var(--color-accent);
+    outline: none;
+  }
+  .field::placeholder {
+    color: var(--color-faint);
+  }
+  .field:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .field[aria-invalid="true"] {
+    border-color: var(--color-danger);
+  }
+
+  /* A row that is being worked on, e.g. a saving table row */
+  .row-busy {
+    opacity: 0.55;
+    pointer-events: none;
+  }
+
+  /* Truncation that still allows a tooltip via title= */
+  .clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  @keyframes ps-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .animate-in {
+    animation: ps-fade-up 180ms var(--ease-out) both;
+  }
+
+  @keyframes ps-shimmer {
+    from {
+      background-position: -200% 0;
+    }
+    to {
+      background-position: 200% 0;
+    }
+  }
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-raised) 25%,
+      var(--color-overlay) 50%,
+      var(--color-raised) 75%
+    );
+    background-size: 200% 100%;
+    animation: ps-shimmer 1.4s linear infinite;
+    border-radius: var(--radius-inner);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
 }

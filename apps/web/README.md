@@ -1,10 +1,13 @@
-# Polarsight
+# Polarsight website
 
-Marketing site for Polarsight, a campus cybersecurity training programme that
-runs hands-on labs inside colleges and connects graduates to hiring teams.
+The public site. Next.js 16 (App Router), React 19, Tailwind CSS 4,
+Framer Motion and lucide-react. Every route is statically prerendered
+and revalidated once a minute.
 
-Built with Next.js 16 (App Router), React 19, Tailwind CSS 4, Framer Motion
-and lucide-react. The whole page prerenders as static HTML.
+Content comes from the admin portal through the API, falling back key
+by key to the copy in `lib/` — so a partially populated database still
+renders a complete page, an API outage changes nothing a visitor can
+see, and a fresh clone with no database at all still builds.
 
 ## Running it
 
@@ -15,55 +18,82 @@ npm run build   # production build
 npm start       # serve the production build
 ```
 
-## Editing the content
+The API's address comes from `API_URL` in the repository-root `.env`.
+Without it the site renders entirely from the built-in copy.
 
-**All site copy lives in `lib/content.js`.** Change the text there and the page
-updates. You should not need to touch a component to change wording, section
-headings, track names, FAQ entries or contact details.
+## Where the content lives
 
-Anything marked `PLACEHOLDER` in that file is invented and must be replaced
-before the site goes live:
-
-| What | Where |
+| File | Holds |
 |---|---|
-| Email and phone number | `brand` |
-| Partner institutions and cohort figures | `outcomes` |
+| `lib/content.js` | Site chrome: brand, nav, the hero, the footer |
+| `lib/home.js` | Every homepage section after the hero |
+| `lib/pages.js` | The About, Outcomes and Careers pages |
+| `lib/programmes.js` | Programme detail, and the programmes intro |
+| `lib/siteConfig.js` | Contact details and social URLs, from the environment |
 
-The `outcomes.note` line is rendered on the page as a visible caveat. Delete it
-once the figures are real.
+Each of those is the **fallback** for one editable surface in the
+portal. Copy is never duplicated between them: if a page renders it,
+exactly one module holds it.
+
+`lib/getContent.js` resolves what a page actually renders, and
+`lib/merge.js` layers the published document over the built-in copy
+field by field. When a component gains or loses a field, change it in
+the component, in `lib/merge.js`, in the API's
+`modules/pages/schema.ts` and in the seed — those four move together.
+
+### What the portal cannot change
+
+Navigation links, footer link columns and every button's destination
+are decided in code and never read from the database, so no edit can
+point the site at a URL that does not exist.
+
+The homepage's **first screen** — the hero's layout, its animated mark
+and the navigation above it — has no representation in the CMS at all.
+The hero's words are editable as content blocks; nothing else about it
+is.
 
 ## Structure
 
 | File | Purpose |
 |---|---|
-| `app/globals.css` | Design tokens, base styles, keyframes |
+| `app/globals.css` | Design tokens, base styles, the cursor |
 | `app/layout.jsx` | Fonts, metadata, skip link |
-| `app/page.jsx` | Section order |
-| `lib/content.js` | Every piece of copy |
-| `components/ui.jsx` | Section, Heading, Button, Chip, Reveal primitives |
-| `components/mocks/` | The small illustrative UI panels |
-| `components/DotShield.jsx` | Hero dot-matrix illustration |
+| `app/page.jsx` | The homepage's section order |
+| `app/api/revalidate/` | On-demand ISR, called by the API on publish |
+| `components/ui.jsx` | Section, Kicker, Heading, Button, Tag, Reveal, Hairline |
+| `components/Hero.jsx`, `HeroMark.jsx` | The first screen |
+| `components/home/` | One component per homepage section |
+| `components/PageShell.jsx` | Chrome for every page other than the homepage |
 
-Sections render in this order: hero, about, who we serve, programmes, outcomes,
-why us, what changes, marquee, coverage, FAQ, closing call to action, footer.
+Homepage order: hero, intro, programmes, approach, outcomes,
+institutions, team, closing. A section an administrator has hidden is
+not rendered at all.
 
 ## Design notes
 
-Type is Space Grotesk for everything structural and JetBrains Mono for the
-small uppercase labels, numbers and technical details.
+Type is Michroma for display, Space Grotesk for body and JetBrains
+Mono for the small uppercase labels and technical details.
 
-Colour is defined as tokens in `app/globals.css` under `@theme`. There is one
-action colour, `--color-leaf`, with `--color-leaf-deep` as its accessible text
-variant. Every text and background pair in the palette meets WCAG AA at 4.5:1
-or better, the lowest being 4.58:1. If you change `--color-leaf-deep` or
-`--color-faint`, re-check contrast before shipping.
+Colour is defined as tokens in `app/globals.css` under `@theme`. There
+is one accent hue: `--color-accent` for fills, indicators and marks,
+and `--color-accent-ice` as the text-safe variant, because electric
+blue does not clear 4.5:1 as small text on these surfaces. Re-check
+contrast before changing either.
 
-Accessibility work already in place: a skip link, visible focus rings, arrow-key
-navigation on the audience tabs, proper `aria-expanded` and `aria-controls` on
-the FAQ, text alternatives for the animated marquee and illustrations, and
-`prefers-reduced-motion` honoured globally.
+The hero mark is a canvas point cloud: three artwork layers are
+sampled into dots at runtime and projected by hand each frame, so
+there is no data file to ship. It holds still under
+`prefers-reduced-motion`.
 
-## Attribution
+Accessibility in place: a skip link, visible focus rings, correct
+`aria-expanded`/`aria-controls` on the curriculum accordions, labelled
+form errors announced with `role="alert"`, text alternatives for every
+illustration, and `prefers-reduced-motion` honoured globally.
 
-The layout follows common marketing-site conventions. All copy, the logo, the
-dot-matrix illustration and the UI panels are original to this project.
+## Claims
+
+Nothing in `lib/` asserts a statistic, a testimonial, an existing
+college or industry partnership, a placement rate, a fee, a
+certification or an employment guarantee, because none of those are
+established. Keep it that way: a figure may only go on the site once
+an administrator has verified it in the portal.

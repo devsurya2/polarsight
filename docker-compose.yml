@@ -27,6 +27,28 @@ services:
       timeout: 5s
       retries: 10
 
+  # Malware scanner for uploads. Optional locally (profile "scan"),
+  # required in production: the API refuses to start without it.
+  #   docker compose --profile scan up -d clamav
+  clamav:
+    image: clamav/clamav:stable
+    container_name: polarsight-clamav
+    profiles: ["scan"]
+    restart: unless-stopped
+    ports:
+      # Loopback only: nothing outside this host should reach clamd.
+      - "127.0.0.1:3310:3310"
+    volumes:
+      - polarsight-clamav:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 5m
+
 volumes:
+  polarsight-clamav:
+    name: polarsight-clamav
   polarsight-pgdata:
     name: polarsight-pgdata

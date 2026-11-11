@@ -6,6 +6,8 @@
 //  - deletes that would orphan rows are restricted, not cascaded,
 //    except where the child has no meaning without its parent
 //  - media binaries live in object storage; only metadata is here
+//  - editable content keeps the live value and the working draft in
+//    separate columns, so a draft can never be served publicly
 
 generator client {
   provider = "prisma-client-js"
@@ -23,7 +25,7 @@ datasource db {
 model AdminUser {
   id           String    @id @default(cuid())
   email        String    @unique
-  passwordHash String @map("password_hash")
+  passwordHash String    @map("password_hash")
   name         String
   isActive     Boolean   @default(true) @map("is_active")
   lastLoginAt  DateTime? @map("last_login_at")
@@ -32,6 +34,23 @@ model AdminUser {
   failedLoginCount Int       @default(0) @map("failed_login_count")
   lockedUntil      DateTime? @map("locked_until")
 
+  // Access tokens are stateless, so revoking a refresh token alone
+  // would leave the current access token working until it expired.
+  // Every token issued before this instant is rejected, which makes
+  // deactivation, a role change and an explicit revocation take
+  // effect on the very next request.
+  sessionsValidFrom DateTime? @map("sessions_valid_from")
+
+  // Time-based one-time-password MFA. The secret is stored encrypted
+  // (AES-256-GCM, key from MFA_ENCRYPTION_KEY); recovery codes are
+  // stored as SHA-256 digests and each works exactly once. A pending
+  // secret exists only between "start enrolment" and the first valid
+  // code, so an abandoned enrolment never locks anyone out.
+  mfaSecret        String?   @map("mfa_secret")
+  mfaPendingSecret String?   @map("mfa_pending_secret")
+  mfaEnabledAt     DateTime? @map("mfa_enabled_at")
+  mfaRecoveryCodes String[]  @default([]) @map("mfa_recovery_codes")
+
   roleId String @map("role_id")
   role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
@@ -39,6 +58,13 @@ model AdminUser {
   auditLogs     AuditLog[]
   enquiryNotes  EnquiryNote[]
   uploads       MediaAsset[]
+
+  assignedEnquiries    Enquiry[]
+  assignedApplications TrainerApplication[]
+  applicationNotes     ApplicationNote[]
+  applicationEvents    ApplicationEvent[]
+  contentVersions      ContentVersion[]
+  settingUpdates       SiteSetting[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -102,11 +128,11 @@ model RolePermission {
 model RefreshToken {
   id        String    @id @default(cuid())
   tokenHash String    @unique @map("token_hash")
-  familyId  String @map("family_id")
-  userId    String @map("user_id")
+  familyId  String    @map("family_id")
+  userId    String    @map("user_id")
   user      AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  expiresAt DateTime @map("expires_at")
+  expiresAt DateTime  @map("expires_at")
   usedAt    DateTime? @map("used_at")
   revokedAt DateTime? @map("revoked_at")
 
@@ -128,29 +154,49 @@ model RefreshToken {
 enum PublishStatus {
   DRAFT
   PUBLISHED
+  ARCHIVED
 }
 
 model Programme {
-  id      String @id @default(cuid())
-  slug    String @unique
-  code    String @unique // e.g. TRK-01
+  id      String  @id @default(cuid())
+  slug    String  @unique
+  code    String  @unique // e.g. TRK-01
   name    String
   tag     String // e.g. "Security Operations"
   summary String
   body    String?
 
-  durationWeeks Int? @map("duration_weeks")
+  durationWeeks Int?    @map("duration_weeks")
   level         String?
 
   // Bullet points shown on the card
   points String[]
 
+  // Structured programme detail. Arrays rather than free HTML, so an
+  // editor cannot inject markup into the public page.
+  objectives       String[]
+  targetAudience   String[] @map("target_audience")
+  eligibility      String[]
+  prerequisites    String[]
+  tools            String[]
+  exercises        String[]
+  projects         String[]
+  learningOutcomes String[] @map("learning_outcomes")
+  careerPathways   String[] @map("career_pathways")
+
+  seoTitle       String? @map("seo_title")
+  seoDescription String? @map("seo_description")
+
   status      PublishStatus @default(DRAFT)
-  publishedAt DateTime? @map("published_at")
+  publishedAt DateTime?     @map("published_at")
+  archivedAt  DateTime?     @map("archived_at")
   sortOrder   Int           @default(0) @map("sort_order")
 
-  imageId String? @map("image_id")
-  image   MediaAsset? @relation(fields: [imageId], references: [id], onDelete: SetNull)
+  imageId String?     @map("image_id")
+  image   MediaAsset? @relation("ProgrammeCover", fields: [imageId], references: [id], onDelete: SetNull)
+
+  gallery ProgrammeImage[]
+  modules CurriculumModule[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -160,6 +206,62 @@ model Programme {
   @@map("programmes")
 }
 
+// Additional images for a programme, ordered. The join carries the
+// order, so the same asset can be reused across programmes.
+model ProgrammeImage {
+  programmeId String @map("programme_id")
+  mediaId     String @map("media_id")
+  sortOrder   Int    @default(0) @map("sort_order")
+
+  programme Programme  @relation(fields: [programmeId], references: [id], onDelete: Cascade)
+  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([programmeId, mediaId])
+  @@index([mediaId])
+  @@map("programme_images")
+}
+
+model CurriculumModule {
+  id      String  @id @default(cuid())
+  title   String
+  summary String?
+
+  programmeId String    @map("programme_id")
+  programme   Programme @relation(fields: [programmeId], references: [id], onDelete: Cascade)
+
+  // A module hidden from the public curriculum while it is written.
+  status    PublishStatus @default(DRAFT)
+  sortOrder Int           @default(0) @map("sort_order")
+
+  topics CurriculumTopic[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([programmeId, sortOrder])
+  @@index([status])
+  @@map("curriculum_modules")
+}
+
+model CurriculumTopic {
+  id          String  @id @default(cuid())
+  title       String
+  description String?
+
+  moduleId String           @map("module_id")
+  module   CurriculumModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  sortOrder Int @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([moduleId, sortOrder])
+  @@map("curriculum_topics")
+}
+
 enum ContentType {
   TEXT
   RICH_TEXT
@@ -167,6 +269,10 @@ enum ContentType {
 }
 
 // Keyed blocks of marketing copy, e.g. "hero.headline".
+//
+// `value` is the live, published value: it is the only column the
+// public API reads. `draftValue` is the editor's work in progress and
+// is never served publicly. Publishing copies draftValue into value.
 model WebsiteContent {
   id      String      @id @default(cuid())
   key     String      @unique
@@ -175,8 +281,16 @@ model WebsiteContent {
   type    ContentType @default(TEXT)
   value   String // plain text, rich text, or serialised JSON
 
+  draftValue String? @map("draft_value")
+
   status    PublishStatus @default(PUBLISHED)
   sortOrder Int           @default(0) @map("sort_order")
+
+  // Locked blocks are structural (navigation, routing) and the API
+  // refuses to edit them, so a content change cannot break the site.
+  isLocked Boolean @default(false) @map("is_locked")
+
+  publishedAt DateTime? @map("published_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -186,75 +300,240 @@ model WebsiteContent {
   @@map("website_content")
 }
 
-model Statistic {
+// A whole public page: its SEO metadata and its structured body.
+//
+// `published` is what the public API serves. `draft` is the working
+// copy. The two are separate columns rather than separate rows, so
+// serving a draft by accident is not possible.
+model SitePage {
   id    String @id @default(cuid())
-  key   String @unique
-  label String
-  value String
-
-  status    PublishStatus @default(DRAFT)
-  sortOrder Int           @default(0) @map("sort_order")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  @@index([status, sortOrder])
-  @@map("statistics")
-}
-
-model Audience {
-  id      String  @id @default(cuid())
-  slug    String  @unique
-  name    String
-  heading String
-  blurb   String
-  outcome String?
-  bullets String[]
-
-  status    PublishStatus @default(DRAFT)
-  sortOrder Int           @default(0) @map("sort_order")
-
-  imageId String? @map("image_id")
-  image   MediaAsset? @relation(fields: [imageId], references: [id], onDelete: SetNull)
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  @@index([status, sortOrder])
-  @@index([imageId])
-  @@map("audiences")
-}
-
-model CareerContent {
-  id    String @id @default(cuid())
+  // Route key: "home", "about", "outcomes", "programmes", "careers", "contact"
   key   String @unique
   title String
-  body  String
 
-  status    PublishStatus @default(DRAFT)
-  sortOrder Int           @default(0) @map("sort_order")
+  seoTitle       String? @map("seo_title")
+  seoDescription String? @map("seo_description")
+
+  seoImageId String?     @map("seo_image_id")
+  seoImage   MediaAsset? @relation("PageSeoImage", fields: [seoImageId], references: [id], onDelete: SetNull)
+
+  draft     Json
+  published Json?
+
+  status      PublishStatus @default(DRAFT)
+  publishedAt DateTime?     @map("published_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@index([status, sortOrder])
-  @@map("career_content")
+  @@index([status])
+  @@index([seoImageId])
+  @@map("site_pages")
 }
 
-model FAQ {
-  id       String @id @default(cuid())
-  question String
-  answer   String
-  category String?
+// Immutable snapshots, written on every publish and on demand.
+// Restoring copies a snapshot back into the record's draft; it never
+// mutates the snapshot itself.
+model ContentVersion {
+  id       String  @id @default(cuid())
+  entity   String // "SitePage", "WebsiteContent", "Programme"
+  entityId String  @map("entity_id")
+  // Monotonic per entity, so "version 3" means something.
+  version  Int
+  label    String?
+  payload  Json
 
-  status    PublishStatus @default(DRAFT)
-  sortOrder Int           @default(0) @map("sort_order")
+  actorId String?    @map("actor_id")
+  actor   AdminUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([entity, entityId, version])
+  @@index([entity, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("content_versions")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Recruitment
+// ─────────────────────────────────────────────────────────────
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  GUEST_TRAINER
+  INDUSTRY_EXPERT
+}
+
+enum WorkMode {
+  ON_CAMPUS
+  REMOTE
+  HYBRID
+}
+
+model JobOpening {
+  id    String @id @default(cuid())
+  slug  String @unique
+  title String
+
+  department     String
+  employmentType EmploymentType @map("employment_type")
+  location       String
+  workMode       WorkMode       @map("work_mode")
+
+  description             String
+  responsibilities        String[]
+  requiredSkills          String[] @map("required_skills")
+  preferredQualifications String[] @map("preferred_qualifications")
+  certifications          String[]
+
+  // Stated as a minimum plus a free-text note, so the site never
+  // implies a range the business has not agreed.
+  experienceMinYears Int?    @map("experience_min_years")
+  experienceNote     String? @map("experience_note")
+
+  applicationInstructions String?   @map("application_instructions")
+  applicationDeadline     DateTime? @map("application_deadline")
+
+  seoTitle       String? @map("seo_title")
+  seoDescription String? @map("seo_description")
+
+  status      PublishStatus @default(DRAFT)
+  publishedAt DateTime?     @map("published_at")
+  archivedAt  DateTime?     @map("archived_at")
+  sortOrder   Int           @default(0) @map("sort_order")
+
+  applications TrainerApplication[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([status, sortOrder])
-  @@map("faqs")
+  @@index([department])
+  @@map("job_openings")
+}
+
+enum ApplicationStatus {
+  NEW
+  UNDER_REVIEW
+  SHORTLISTED
+  INTERVIEW_SCHEDULED
+  TECHNICAL_ASSESSMENT
+  DEMO_SESSION
+  SELECTED
+  REJECTED
+  WITHDRAWN
+}
+
+model TrainerApplication {
+  id       String  @id @default(cuid())
+  fullName String  @map("full_name")
+  email    String
+  phone    String?
+  location String?
+
+  education           String?
+  currentOrganisation String? @map("current_organisation")
+
+  experienceYears   Int?     @map("experience_years")
+  experienceSummary String?  @map("experience_summary")
+  expertise         String[]
+  technicalSkills   String[] @map("technical_skills")
+  certifications    String[]
+
+  // The opening applied for. The text is snapshotted alongside the
+  // reference so the record still reads correctly if the opening is
+  // later renamed or removed.
+  jobOpeningId    String?     @map("job_opening_id")
+  jobOpening      JobOpening? @relation(fields: [jobOpeningId], references: [id], onDelete: SetNull)
+  appliedPosition String      @map("applied_position")
+
+  employmentPreference EmploymentType? @map("employment_preference")
+
+  linkedinUrl  String? @map("linkedin_url")
+  portfolioUrl String? @map("portfolio_url")
+
+  resumeId String?     @map("resume_id")
+  resume   MediaAsset? @relation("ApplicationResume", fields: [resumeId], references: [id], onDelete: SetNull)
+
+  additionalInfo String? @map("additional_info")
+
+  status ApplicationStatus @default(NEW)
+
+  assignedToId String?    @map("assigned_to_id")
+  assignedTo   AdminUser? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  interviewAt DateTime? @map("interview_at")
+  archivedAt  DateTime? @map("archived_at")
+
+  // Captured for abuse investigation, never shown in the UI
+  sourceIp  String? @map("source_ip")
+  userAgent String? @map("user_agent")
+
+  notes  ApplicationNote[]
+  events ApplicationEvent[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([jobOpeningId])
+  @@index([assignedToId])
+  @@index([email])
+  @@index([createdAt])
+  @@map("trainer_applications")
+}
+
+enum ApplicationNoteKind {
+  NOTE
+  INTERVIEW_FEEDBACK
+  DEMO_FEEDBACK
+}
+
+// Internal evaluation. Nothing in this table is ever exposed through
+// a public endpoint.
+model ApplicationNote {
+  id   String              @id @default(cuid())
+  body String
+  kind ApplicationNoteKind @default(NOTE)
+
+  applicationId String             @map("application_id")
+  application   TrainerApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  authorId String?    @map("author_id")
+  author   AdminUser? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([applicationId])
+  @@index([authorId])
+  @@map("application_notes")
+}
+
+// Append-only status history for an application.
+model ApplicationEvent {
+  id String @id @default(cuid())
+
+  applicationId String             @map("application_id")
+  application   TrainerApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  fromStatus  ApplicationStatus? @map("from_status")
+  toStatus    ApplicationStatus  @map("to_status")
+  note        String?
+  // Set when the transition scheduled something, e.g. an interview.
+  scheduledAt DateTime?          @map("scheduled_at")
+
+  actorId String?    @map("actor_id")
+  actor   AdminUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([applicationId, createdAt])
+  @@index([actorId])
+  @@map("application_events")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -263,8 +542,12 @@ model FAQ {
 
 enum EnquiryStatus {
   NEW
+  // Retained because existing rows use it; UNDER_REVIEW supersedes it.
   IN_PROGRESS
+  UNDER_REVIEW
   CONTACTED
+  FOLLOW_UP_REQUIRED
+  CONVERTED
   CLOSED
   SPAM
 }
@@ -275,10 +558,20 @@ model Enquiry {
   email        String
   phone        String?
   organisation String?
+  designation  String?
+  // What the enquiry is about, from the contact form's fixed list.
   subject      String?
+  // Which programme the enquiry names, when it names one.
+  programme    String?
   message      String
 
   status EnquiryStatus @default(NEW)
+
+  assignedToId String?    @map("assigned_to_id")
+  assignedTo   AdminUser? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  followUpAt DateTime? @map("follow_up_at")
+  archivedAt DateTime? @map("archived_at")
 
   // Captured for abuse investigation, not shown in the UI
   sourceIp  String? @map("source_ip")
@@ -290,19 +583,21 @@ model Enquiry {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([status, createdAt])
+  @@index([assignedToId])
+  @@index([followUpAt])
   @@index([email])
   @@index([createdAt])
   @@map("enquiries")
 }
 
 model EnquiryNote {
-  id      String  @id @default(cuid())
-  body    String
+  id   String @id @default(cuid())
+  body String
 
-  enquiryId String @map("enquiry_id")
+  enquiryId String  @map("enquiry_id")
   enquiry   Enquiry @relation(fields: [enquiryId], references: [id], onDelete: Cascade)
 
-  authorId String? @map("author_id")
+  authorId String?    @map("author_id")
   author   AdminUser? @relation(fields: [authorId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -314,6 +609,50 @@ model EnquiryNote {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Settings
+// ─────────────────────────────────────────────────────────────
+
+enum SettingType {
+  TEXT
+  LONG_TEXT
+  URL
+  EMAIL
+  NUMBER
+  BOOLEAN
+  MEDIA
+  JSON
+}
+
+// Operational configuration an administrator may change.
+//
+// Secrets do NOT belong here: credentials stay in the server's
+// environment. The API refuses to create a setting whose key looks
+// like a credential, and never returns a value marked isSecret.
+model SiteSetting {
+  id    String      @id @default(cuid())
+  key   String      @unique
+  group String // "general", "seo", "contact", "security"
+  label String
+  type  SettingType @default(TEXT)
+  value String
+  hint  String?
+
+  // Reserved for values that must never leave the server.
+  isSecret Boolean @default(false) @map("is_secret")
+  // A locked setting is read-only over the API.
+  isLocked Boolean @default(false) @map("is_locked")
+
+  updatedById String?    @map("updated_by_id")
+  updatedBy   AdminUser? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([group])
+  @@map("site_settings")
+}
+
+// ─────────────────────────────────────────────────────────────
 // Media and audit
 // ─────────────────────────────────────────────────────────────
 
@@ -322,43 +661,77 @@ model EnquiryNote {
 model MediaAsset {
   id           String  @id @default(cuid())
   filename     String
-  originalName String @map("original_name")
-  mimeType     String @map("mime_type")
-  sizeBytes    Int @map("size_bytes")
+  originalName String  @map("original_name")
+  mimeType     String  @map("mime_type")
+  sizeBytes    Int     @map("size_bytes")
   storageKey   String  @unique @map("storage_key")
   url          String
   width        Int?
   height       Int?
   alt          String?
+  title        String?
+  description  String?
   checksum     String?
 
-  uploadedById String? @map("uploaded_by_id")
+  // A resume is applicant data, not website media: it is excluded
+  // from the media library listing and needs its own permission to
+  // download.
+  isPrivate Boolean @default(false) @map("is_private")
+
+  // Malware-scan pipeline. Every upload starts QUARANTINED and is
+  // released only by a CLEAN verdict from the scanner. A scanner that
+  // is unreachable leaves the file where it is (SCAN_FAILED), never
+  // approved by default. Private files cannot be downloaded unless
+  // CLEAN; public files are not served unless CLEAN.
+  scanStatus     ScanStatus @default(QUARANTINED) @map("scan_status")
+  scannedAt      DateTime?  @map("scanned_at")
+  scannerVersion String?    @map("scanner_version")
+  scanDetail     String?    @map("scan_detail")
+
+  uploadedById String?    @map("uploaded_by_id")
   uploadedBy   AdminUser? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
 
-  programmes Programme[]
-  audiences  Audience[]
+  programmes         Programme[]          @relation("ProgrammeCover")
+  programmeGallery   ProgrammeImage[]
+  pageSeoImages      SitePage[]           @relation("PageSeoImage")
+  applicationResumes TrainerApplication[] @relation("ApplicationResume")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([uploadedById])
   @@index([mimeType])
+  @@index([isPrivate])
+  @@index([scanStatus])
   @@index([createdAt])
   @@map("media_assets")
 }
 
+enum ScanStatus {
+  QUARANTINED
+  SCANNING
+  CLEAN
+  REJECTED
+  SCAN_FAILED
+  SCAN_SKIPPED
+}
+
 model AuditLog {
-  id     String @id @default(cuid())
-  action String // e.g. "programme.update"
-  entity String // e.g. "Programme"
+  id       String  @id @default(cuid())
+  action   String // e.g. "programme.update"
+  entity   String // e.g. "Programme"
   entityId String? @map("entity_id")
 
   // Snapshots either side of the change, for investigation
   before Json?
   after  Json?
 
-  actorId String? @map("actor_id")
+  actorId String?    @map("actor_id")
   actor   AdminUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  // Recorded for actions taken without a session, e.g. a failed
+  // sign-in, where there is no actor to point at.
+  actorLabel String? @map("actor_label")
 
   ip        String?
   userAgent String? @map("user_agent")
@@ -367,6 +740,7 @@ model AuditLog {
 
   @@index([actorId])
   @@index([entity, entityId])
+  @@index([action])
   @@index([createdAt])
   @@map("audit_logs")
 }

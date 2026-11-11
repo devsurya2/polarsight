@@ -1,0 +1,41 @@
+rules:
+  - id: polarsight-no-raw-sql-unsafe
+    message: $queryRawUnsafe/$executeRawUnsafe interpolate strings into SQL. Use tagged $queryRaw or the query builder.
+    severity: ERROR
+    languages: [typescript]
+    patterns:
+      - pattern-either:
+          - pattern: $P.$queryRawUnsafe(...)
+          - pattern: $P.$executeRawUnsafe(...)
+  - id: polarsight-no-dangerous-html
+    message: dangerouslySetInnerHTML renders unescaped HTML. Website copy is plain text by design.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern: dangerouslySetInnerHTML
+  - id: polarsight-no-child-process
+    message: The API must not spawn processes; scanning goes through clamd over TCP.
+    severity: ERROR
+    languages: [typescript]
+    paths:
+      include: [apps/api/src]
+    pattern-either:
+      - pattern: import $X from "node:child_process"
+      - pattern: import $X from "child_process"
+      - pattern: require("child_process")
+  - id: polarsight-no-eval
+    message: eval / new Function execute strings as code.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+  - id: polarsight-token-in-local-storage
+    message: Never keep a session token in web storage; the session lives in httpOnly cookies.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern-either:
+      - pattern: localStorage.setItem("$K", $V)
+      - pattern: sessionStorage.setItem("$K", $V)
+    metavariable-regex:
+      metavariable: $K
+      regex: (?i).*(token|jwt|session|secret|password).*

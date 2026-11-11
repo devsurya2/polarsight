@@ -7,7 +7,6 @@
 @theme {
   --color-canvas: #080A10;
   --color-paper: #10141D;
-  --color-sand: #171C27;
 
   --color-ink: #F3F5F8;
   --color-body: #9AA3B2;
@@ -15,38 +14,36 @@
 
   /* Brand accent. `accent` is for fills, indicators and marks;
      `accent-ice` is the text-safe variant, since electric blue
-     does not clear 4.5:1 as small text on these surfaces;
-     `accent-strong` is the button fill that lets white labels
-     pass. All three are the same hue. */
+     does not clear 4.5:1 as small text on these surfaces. Both are
+     the same hue. */
   --color-accent: #1677E8;
-  --color-accent-strong: #1369CD;
   --color-accent-ice: #8CCFFF;
   --color-accent-soft: #0C1C2E;
 
   --color-line: #262C37;
   --color-line-soft: #1A1F29;
 
+  /* Validation and failure states. Muted rather than alarm-red so it
+     sits inside the palette. 9.39:1 on canvas. Used by the field
+     errors in the enquiry and application forms. */
+  --color-clay: #E8A0A0;
+
   /* Inverted surface: primary pills, active tabs, markers */
   --color-invert: #F3F5F8;
   --color-on-invert: #080A10;
 
-  /* Emphasis panel (the "why us" block), raised above the canvas */
+  /* Emphasis panel, raised above the canvas */
   --color-emph: #10141D;
   --color-on-emph: #F3F5F8;
   --color-on-emph-muted: rgba(243, 245, 248, 0.64);
   --color-emph-line: rgba(255, 255, 255, 0.12);
 
-  /* A terminal is dark in both themes, so these never flip */
-  --color-terminal: #0C0F16;
-  --color-on-terminal: rgba(255, 255, 255, 0.86);
 
   /* Glass used by the floating nav */
   --color-glass: rgba(16, 20, 29, 0.84);
   --color-glass-soft: rgba(16, 20, 29, 0.62);
   --color-glass-line: rgba(255, 255, 255, 0.08);
 
-  /* Unrevealed word colour in the scroll reveal */
-  --color-scroll-dim: #5E6878;
 
   --font-display: var(--font-michroma), ui-sans-serif, system-ui, sans-serif;
   --font-body: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
@@ -194,15 +191,6 @@ html {
     box-shadow: var(--shadow-card);
   }
 
-  .lift {
-    transition: box-shadow 300ms ease, transform 300ms ease;
-  }
-
-  .lift:hover {
-    box-shadow: var(--shadow-lift);
-    transform: translateY(-2px);
-  }
-
   /* ── Container ─────────────────────────────────────────────
      Single source of truth for page width. Mobile and tablet use
      padding; from 1024px up the container insets by a fixed gutter
@@ -252,6 +240,23 @@ html {
          the next section begins there rather than above it. */
       min-height: calc(100svh - var(--nav-h));
       padding-block: 2rem;
+    }
+  }
+
+  /* ── Inner-page opening block ───────────────────────────────
+     The navbar is fixed, so the first block on a page has to clear
+     it. The homepage hero does that with margin-top on
+     .hero-section; inner pages pay for it as padding instead, so the
+     dotfield background still runs up behind the navbar. */
+  .page-hero-pad {
+    padding-top: calc(var(--nav-h) + 2rem);
+    padding-bottom: 4rem;
+  }
+
+  @media (min-width: 768px) {
+    .page-hero-pad {
+      padding-top: calc(var(--nav-h) + 3rem);
+      padding-bottom: 6rem;
     }
   }
 
@@ -310,22 +315,6 @@ html {
   }
 }
 
-@keyframes ps-marquee {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-50%); }
-}
-
-@keyframes ps-scan {
-  0%   { opacity: 0.15; }
-  50%  { opacity: 0.55; }
-  100% { opacity: 0.15; }
-}
-
-@keyframes ps-float {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-8px); }
-}
-
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after {
@@ -333,52 +322,6 @@ html {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
-}
-
-/* ───────────────────────────────────────────────────────────
-   3D emblem in the hero.
-   The rig swings rather than fully spinning, so the mark always
-   reads as a star while still showing its extruded depth.
-   ─────────────────────────────────────────────────────────── */
-@keyframes ps-rig {
-  0%, 100% { transform: rotateY(-30deg); }
-  50%      { transform: rotateY(30deg); }
-}
-
-@keyframes ps-wobble {
-  0%, 100% { transform: rotateX(-15deg) translateY(6px); }
-  50%      { transform: rotateX(-7deg) translateY(-10px); }
-}
-
-@keyframes ps-ring-a {
-  from { transform: rotateX(74deg) rotateZ(0deg); }
-  to   { transform: rotateX(74deg) rotateZ(360deg); }
-}
-
-@keyframes ps-ring-b {
-  from { transform: rotateY(68deg) rotateZ(0deg); }
-  to   { transform: rotateY(68deg) rotateZ(-360deg); }
-}
-
-@keyframes ps-ring-c {
-  from { transform: rotateX(30deg) rotateY(46deg) rotateZ(0deg); }
-  to   { transform: rotateX(30deg) rotateY(46deg) rotateZ(360deg); }
-}
-
-@keyframes ps-shadow {
-  0%, 100% { transform: translateX(-50%) scale(1);    opacity: 0.16; }
-  50%      { transform: translateX(-50%) scale(0.86); opacity: 0.09; }
-}
-
-/* Idle motion for the hero mark, running whenever the pointer is away */
-@keyframes ps-sway {
-  0%, 100% { transform: rotateY(-7deg) rotateX(2deg); }
-  50%      { transform: rotateY(7deg) rotateX(-2deg); }
-}
-
-@keyframes ps-twinkle {
-  0%, 100% { opacity: 0.9; transform: scale(1); }
-  45%      { opacity: 1; transform: scale(1.06); }
 }
 
 /* ───────────────────────────────────────────────────────────
@@ -399,8 +342,7 @@ html {
   [role="tab"],
   summary,
   label,
-  [onclick],
-  .lift {
+  [onclick] {
     cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2228%22%20height%3D%2228%22%20viewBox%3D%220%200%2028%2028%22%3E%3Ccircle%20cx%3D%2214.0%22%20cy%3D%2214.0%22%20r%3D%2212.8%22%20fill%3D%22none%22%20stroke%3D%22%231677E8%22%20stroke-opacity%3D%220.55%22%20stroke-width%3D%221%22%2F%3E%3Cpath%20d%3D%22M14.0%201.68%20C14.700000000000001%209.520000000000001%2018.48%2013.299999999999999%2026.32%2014.0%20C18.48%2014.700000000000001%2014.700000000000001%2018.48%2014.0%2026.32%20C13.299999999999999%2018.48%209.520000000000001%2014.700000000000001%201.68%2014.0%20C9.520000000000001%2013.299999999999999%2013.299999999999999%209.520000000000001%2014.0%201.68%20Z%22%20fill%3D%22%238CCFFF%22%20stroke%3D%22%23080A10%22%20stroke-width%3D%220.9%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E") 14 14, pointer;
   }
 

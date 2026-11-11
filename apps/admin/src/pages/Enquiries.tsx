@@ -1,384 +1,401 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, download, qs, type Paged } from "@/lib/api";
+/**
+ * Contact enquiries.
+ *
+ * The list is the working queue: archived enquiries are out of it
+ * unless asked for, and the follow-up filter surfaces what is actually
+ * due. Internal notes live on the detail screen and never appear in
+ * the export.
+ */
+
+import { Link, useSearchParams } from "react-router-dom";
+import { qs } from "@/lib/api";
+import { useAction, useList, useQuery } from "@/lib/hooks";
 import { useAuth } from "@/lib/auth";
-import { formatDateTime, relativeTime } from "@/lib/format";
+import { formatDate, formatDateTime, relativeTime } from "@/lib/format";
 import { useToast } from "@/components/Toast";
-import { Confirm } from "@/components/Modal";
 import {
-  Button, EmptyState, ErrorNote, Loading, PageHeader, Pagination,
-  StatusBadge, Table, Td, Th,
+  Badge,
+  Button,
+  Card,
+  DateRangeFilter,
+  EmptyState,
+  ErrorNote,
+  FilterSelect,
+  LinkButton,
+  PageHeader,
+  Pagination,
+  SearchInput,
+  StatCard,
+  StatusBadge,
+  Table,
+  TableSkeleton,
+  Td,
+  Th,
+  Toolbar,
+  Tr,
+  humanise,
 } from "@/components/ui";
 
-const STATUSES = ["NEW", "IN_PROGRESS", "CONTACTED", "CLOSED", "SPAM"] as const;
+export const ENQUIRY_STATUSES = [
+  "NEW",
+  "UNDER_REVIEW",
+  "CONTACTED",
+  "FOLLOW_UP_REQUIRED",
+  "CONVERTED",
+  "CLOSED",
+  "SPAM",
+] as const;
+
+export const ENQUIRY_SUBJECTS = [
+  "Institutional Training",
+  "College Partnership",
+  "SOC Analyst Programme",
+  "AI Security Programme",
+  "Corporate Training",
+  "Trainer Collaboration",
+  "General Enquiry",
+  "Other",
+] as const;
 
 interface EnquiryRow {
   id: string;
   name: string;
   email: string;
   organisation: string | null;
+  designation: string | null;
   subject: string | null;
+  programme: string | null;
   status: string;
+  followUpAt: string | null;
+  archivedAt: string | null;
   createdAt: string;
+  assignedTo: { id: string; name: string } | null;
   _count: { notes: number };
+}
+
+interface Stats {
+  byStatus: Record<string, number>;
+  bySubject: Record<string, number>;
+  total: number;
+  followUpDue: number;
+  unassigned: number;
+  archived: number;
 }
 
 export function EnquiriesPage() {
   const { can } = useAuth();
   const { notify } = useToast();
+  const { run, isBusy } = useAction();
+  const [params] = useSearchParams();
 
-  const [data, setData] = useState<Paged<EnquiryRow> | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [status, setStatus] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [exporting, setExporting] = useState(false);
+  const list = useList<EnquiryRow>("/enquiries", {
+    status: params.get("status") ?? "",
+    subject: "",
+    assignedToId: "",
+    archived: "false",
+    dueOnly: "",
+    from: "",
+    to: "",
+    sort: "createdAt",
+    dir: "desc",
+  });
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setSearch(searchInput);
-      setPage(1);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  const load = useCallback(
-    async (signal?: AbortSignal) => {
-      try {
-        setError(null);
-        const q = qs({ page, perPage: 20, search: search || undefined, status: status || undefined });
-        setData(await api.get<Paged<EnquiryRow>>(`/enquiries${q}`, signal));
-      } catch (e) {
-        if (!signal?.aborted) setError(e instanceof Error ? e.message : "Failed to load");
-      }
-    },
-    [page, search, status]
+  const stats = useQuery<Stats>("/enquiries/stats");
+  const admins = useQuery<{ items: Array<{ id: string; name: string }> }>(
+    can("admin:read") ? "/admin-users?perPage=100&active=true" : null
   );
 
-  useEffect(() => {
-    const ac = new AbortController();
-    void load(ac.signal);
-    return () => ac.abort();
-  }, [load]);
-
-  const exportCsv = async () => {
-    setExporting(true);
-    try {
-      const q = qs({ search: search || undefined, status: status || undefined, format: "csv" });
-      await download(`/enquiries/export${q}`, `enquiries-${new Date().toISOString().slice(0, 10)}.csv`);
-      notify("Export downloaded");
-    } catch (e) {
-      notify(e instanceof Error ? e.message : "Export failed", "error");
-    } finally {
-      setExporting(false);
+  const exportCsv = async (format: "csv" | "json") => {
+    const { page: _p, sort: _s, dir: _d, ...filters } = list.filters;
+    const result = await run("export", async () => {
+      const res = await fetch(`/api/enquiries/export${qs({ ...filters, format })}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `enquiries-${new Date().toISOString().slice(0, 10)}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+    if (result.ok) {
+      notify(
+        `Export downloaded (${format.toUpperCase()})`,
+        "info",
+        "Reflects the filters you have applied. Internal notes are excluded."
+      );
+    } else {
+      notify(result.error, "error");
     }
   };
+
+  const s = stats.data;
 
   return (
     <>
       <PageHeader
         title="Contact enquiries"
-        description="Submissions from the website contact form."
+        description="Submissions from the website contact form. Internal notes and the administrative history are on each enquiry's own screen."
+        breadcrumbs={[{ label: "Enquiries" }]}
         actions={
           can("enquiry:export") ? (
-            <Button onClick={() => void exportCsv()} loading={exporting}>
-              Export CSV
-            </Button>
+            <>
+              <Button icon="download" loading={isBusy("export")} onClick={() => void exportCsv("csv")}>
+                Export CSV
+              </Button>
+              <Button icon="download" loading={isBusy("export")} onClick={() => void exportCsv("json")}>
+                JSON
+              </Button>
+            </>
           ) : null
         }
       />
 
-      <div className="mb-4 flex flex-wrap gap-3">
-        <input
-          className="field max-w-xs"
-          placeholder="Search name, email, message…"
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          aria-label="Search enquiries"
-        />
-        <select
-          className="field max-w-[12rem]"
-          value={status}
-          onChange={(e) => {
-            setStatus(e.target.value);
-            setPage(1);
-          }}
-          aria-label="Filter by status"
-        >
-          <option value="">All statuses</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>{s.replace(/_/g, " ").toLowerCase()}</option>
-          ))}
-        </select>
-      </div>
-
-      {error && <ErrorNote message={error} />}
-
-      {!data && !error ? (
-        <Loading />
-      ) : data && data.items.length === 0 ? (
-        <div className="panel">
-          <EmptyState
-            title={search || status ? "Nothing matches those filters" : "No enquiries yet"}
-            hint={
-              search || status
-                ? "Try clearing the search or status filter."
-                : "Submissions from the website will appear here."
-            }
+      {s && (
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard label="In the queue" value={s.total} icon="inbox" />
+          <StatCard
+            label="New"
+            value={s.byStatus.NEW ?? 0}
+            icon="mail"
+            tone="info"
+            to="/enquiries?status=NEW"
+          />
+          <StatCard
+            label="Follow-ups due"
+            value={s.followUpDue}
+            icon="clock"
+            tone={s.followUpDue > 0 ? "caution" : "neutral"}
+          />
+          <StatCard
+            label="Unassigned"
+            value={s.unassigned}
+            icon="users"
+            tone={s.unassigned > 0 ? "caution" : "neutral"}
           />
         </div>
-      ) : data ? (
+      )}
+
+      <Toolbar>
+        <SearchInput
+          value={list.searchInput}
+          onChange={list.setSearchInput}
+          placeholder="Name, email, organisation, message…"
+        />
+        <FilterSelect
+          label="Status"
+          value={String(list.filters.status ?? "")}
+          onChange={(v) => list.setFilter({ status: v })}
+          allLabel="All statuses"
+          options={ENQUIRY_STATUSES.map((st) => ({
+            value: st,
+            label: humanise(st),
+            count: s?.byStatus[st],
+          }))}
+        />
+        <FilterSelect
+          label="Type"
+          value={String(list.filters.subject ?? "")}
+          onChange={(v) => list.setFilter({ subject: v })}
+          allLabel="All types"
+          options={ENQUIRY_SUBJECTS.map((sub) => ({
+            value: sub,
+            label: sub,
+            count: s?.bySubject[sub],
+          }))}
+        />
+        {admins.data && (
+          <FilterSelect
+            label="Assigned to"
+            value={String(list.filters.assignedToId ?? "")}
+            onChange={(v) => list.setFilter({ assignedToId: v })}
+            allLabel="Anyone"
+            options={admins.data.items.map((a) => ({ value: a.id, label: a.name }))}
+          />
+        )}
+        <FilterSelect
+          label="Archived"
+          value={String(list.filters.archived ?? "false")}
+          onChange={(v) => list.setFilter({ archived: v || "false" })}
+          allLabel="Active only"
+          options={[
+            { value: "only", label: "Archived only" },
+            { value: "true", label: "Include archived" },
+          ]}
+        />
+        <DateRangeFilter
+          from={String(list.filters.from ?? "")}
+          to={String(list.filters.to ?? "")}
+          onChange={({ from, to }) => list.setFilter({ from, to })}
+        />
+        <Button
+          size="sm"
+          icon="clock"
+          variant={list.filters.dueOnly ? "primary" : "secondary"}
+          className="mb-px"
+          onClick={() => list.setFilter({ dueOnly: list.filters.dueOnly ? "" : "true" })}
+        >
+          Due only
+        </Button>
+        {list.filtered && (
+          <Button size="sm" icon="close" onClick={list.clearFilters} className="mb-px">
+            Clear
+          </Button>
+        )}
+      </Toolbar>
+
+      {list.error && <ErrorNote message={list.error} onRetry={list.reload} />}
+
+      {list.initial ? (
+        <TableSkeleton cols={6} />
+      ) : list.items.length === 0 ? (
+        <Card padded={false}>
+          <EmptyState
+            icon="inbox"
+            title={list.filtered ? "Nothing matches those filters" : "No enquiries yet"}
+            hint={
+              list.filtered
+                ? "Try clearing the filters."
+                : "Submissions from the website contact form appear here."
+            }
+            action={
+              list.filtered ? (
+                <Button size="sm" onClick={list.clearFilters}>
+                  Clear filters
+                </Button>
+              ) : undefined
+            }
+          />
+        </Card>
+      ) : (
         <>
           <Table>
             <thead>
               <tr>
-                <Th>From</Th>
+                <Th
+                  sortable
+                  active={list.filters.sort === "name"}
+                  dir={String(list.filters.dir) as "asc" | "desc"}
+                  onSort={() =>
+                    list.setFilter({ sort: "name", dir: list.filters.dir === "asc" ? "desc" : "asc" })
+                  }
+                >
+                  From
+                </Th>
                 <Th>Organisation</Th>
-                <Th>Subject</Th>
-                <Th>Notes</Th>
+                <Th>Enquiry type</Th>
+                <Th
+                  sortable
+                  active={list.filters.sort === "createdAt"}
+                  dir={String(list.filters.dir) as "asc" | "desc"}
+                  onSort={() =>
+                    list.setFilter({
+                      sort: "createdAt",
+                      dir: list.filters.dir === "asc" ? "desc" : "asc",
+                    })
+                  }
+                >
+                  Received
+                </Th>
+                <Th
+                  sortable
+                  active={list.filters.sort === "followUpAt"}
+                  dir={String(list.filters.dir) as "asc" | "desc"}
+                  onSort={() =>
+                    list.setFilter({
+                      sort: "followUpAt",
+                      dir: list.filters.dir === "asc" ? "desc" : "asc",
+                    })
+                  }
+                >
+                  Follow-up
+                </Th>
                 <Th>Status</Th>
-                <Th>Received</Th>
+                <Th className="text-right">Actions</Th>
               </tr>
             </thead>
             <tbody>
-              {data.items.map((e) => (
-                <tr key={e.id} className="transition-colors hover:bg-raised/50">
-                  <Td>
-                    <Link to={`/enquiries/${e.id}`} className="font-medium hover:text-accent-ice">
-                      {e.name}
-                    </Link>
-                    <span className="block text-xs text-faint">{e.email}</span>
-                  </Td>
-                  <Td className="text-body">{e.organisation ?? "—"}</Td>
-                  <Td className="text-body">{e.subject ?? "—"}</Td>
-                  <Td className="text-xs text-faint">{e._count.notes || "—"}</Td>
-                  <Td><StatusBadge status={e.status} /></Td>
-                  <Td className="whitespace-nowrap text-xs text-faint" title={formatDateTime(e.createdAt)}>
-                    {relativeTime(e.createdAt)}
-                  </Td>
-                </tr>
-              ))}
+              {list.items.map((e) => {
+                const due = e.followUpAt && new Date(e.followUpAt).getTime() <= Date.now();
+                return (
+                  <Tr key={e.id}>
+                    <Td>
+                      <Link
+                        to={`/enquiries/${e.id}`}
+                        className="block font-medium transition-colors hover:text-accent-ice"
+                      >
+                        {e.name}
+                      </Link>
+                      <p className="truncate text-xs text-faint">{e.email}</p>
+                      {e.assignedTo && (
+                        <p className="mt-1 text-[0.6875rem] text-faint">{e.assignedTo.name}</p>
+                      )}
+                    </Td>
+                    <Td>
+                      <p className="text-sm">{e.organisation ?? <span className="text-faint">—</span>}</p>
+                      {e.designation && <p className="text-xs text-faint">{e.designation}</p>}
+                    </Td>
+                    <Td>
+                      {e.subject ? <Badge>{e.subject}</Badge> : <span className="text-xs text-faint">Unspecified</span>}
+                      {e.programme && (
+                        <p className="mt-1 text-[0.6875rem] text-faint">{e.programme}</p>
+                      )}
+                    </Td>
+                    <Td>
+                      <span className="text-xs text-body" title={formatDateTime(e.createdAt)}>
+                        {relativeTime(e.createdAt)}
+                      </span>
+                    </Td>
+                    <Td>
+                      {e.followUpAt ? (
+                        <Badge tone={due ? "caution" : "neutral"} icon="clock">
+                          {formatDate(e.followUpAt)}
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-faint">—</span>
+                      )}
+                    </Td>
+                    <Td>
+                      <StatusBadge status={e.status} />
+                      {e.archivedAt && (
+                        <span className="mt-1 block">
+                          <Badge tone="neutral" icon="archive">
+                            Archived
+                          </Badge>
+                        </span>
+                      )}
+                      {e._count.notes > 0 && (
+                        <span className="mt-1 block text-[0.6875rem] text-faint">
+                          {e._count.notes} note{e._count.notes === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </Td>
+                    <Td className="text-right">
+                      <LinkButton to={`/enquiries/${e.id}`} size="sm">
+                        Open
+                      </LinkButton>
+                    </Td>
+                  </Tr>
+                );
+              })}
             </tbody>
           </Table>
 
-          <Pagination
-            page={data.pagination.page}
-            totalPages={data.pagination.totalPages}
-            total={data.pagination.total}
-            onPage={setPage}
-          />
+          {list.pagination && (
+            <Pagination
+              page={list.pagination.page}
+              totalPages={list.pagination.totalPages}
+              total={list.pagination.total}
+              perPage={list.pagination.perPage}
+              onPage={list.setPage}
+            />
+          )}
         </>
-      ) : null}
-    </>
-  );
-}
-
-/* ── Detail ───────────────────────────────────────────────── */
-
-interface Note {
-  id: string;
-  body: string;
-  createdAt: string;
-  author: { id: string; name: string; email: string } | null;
-}
-
-interface EnquiryDetail {
-  id: string;
-  name: string;
-  email: string;
-  phone: string | null;
-  organisation: string | null;
-  subject: string | null;
-  message: string;
-  status: string;
-  createdAt: string;
-  notes: Note[];
-}
-
-export function EnquiryDetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const { can } = useAuth();
-  const { notify } = useToast();
-
-  const [item, setItem] = useState<EnquiryDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  const load = useCallback(async () => {
-    if (!id) return;
-    try {
-      setError(null);
-      const { item } = await api.get<{ item: EnquiryDetail }>(`/enquiries/${id}`);
-      setItem(item);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load");
-    }
-  }, [id]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const setStatus = async (status: string) => {
-    if (!id) return;
-    setBusy(true);
-    try {
-      await api.patch(`/enquiries/${id}/status`, { status });
-      notify("Status updated");
-      await load();
-    } catch (e) {
-      notify(e instanceof Error ? e.message : "Failed", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addNote = async () => {
-    if (!id || !note.trim()) return;
-    setBusy(true);
-    try {
-      await api.post(`/enquiries/${id}/notes`, { body: note.trim() });
-      setNote("");
-      notify("Note added");
-      await load();
-    } catch (e) {
-      notify(e instanceof Error ? e.message : "Failed", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async () => {
-    if (!id) return;
-    setBusy(true);
-    try {
-      await api.del(`/enquiries/${id}`);
-      notify("Enquiry deleted");
-      navigate("/enquiries", { replace: true });
-    } catch (e) {
-      notify(e instanceof Error ? e.message : "Failed", "error");
-      setBusy(false);
-    }
-  };
-
-  if (error) return <ErrorNote message={error} />;
-  if (!item) return <Loading />;
-
-  const canWrite = can("enquiry:write");
-
-  return (
-    <>
-      <Link to="/enquiries" className="mb-4 inline-block text-xs text-faint hover:text-ink">
-        ← Back to enquiries
-      </Link>
-
-      <PageHeader
-        title={item.name}
-        description={`Received ${formatDateTime(item.createdAt)}`}
-        actions={
-          canWrite ? (
-            <>
-              <select
-                className="field max-w-[12rem]"
-                value={item.status}
-                disabled={busy}
-                onChange={(e) => void setStatus(e.target.value)}
-                aria-label="Change status"
-              >
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>{s.replace(/_/g, " ").toLowerCase()}</option>
-                ))}
-              </select>
-              <Button variant="danger" onClick={() => setConfirmDelete(true)}>Delete</Button>
-            </>
-          ) : (
-            <StatusBadge status={item.status} />
-          )
-        }
-      />
-
-      <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
-        <div className="panel p-5">
-          <h2 className="label mb-3">Message</h2>
-          <p className="whitespace-pre-wrap text-sm leading-relaxed">{item.message}</p>
-
-          <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-line pt-5 text-sm">
-            <div>
-              <dt className="label mb-1">Email</dt>
-              <dd><a href={`mailto:${item.email}`} className="text-accent-ice hover:underline">{item.email}</a></dd>
-            </div>
-            <div>
-              <dt className="label mb-1">Phone</dt>
-              <dd>{item.phone ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="label mb-1">Organisation</dt>
-              <dd>{item.organisation ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="label mb-1">Subject</dt>
-              <dd>{item.subject ?? "—"}</dd>
-            </div>
-          </dl>
-        </div>
-
-        <div className="panel p-5">
-          <h2 className="label mb-3">Internal notes</h2>
-
-          {canWrite && (
-            <div className="mb-5">
-              <textarea
-                className="field resize-y"
-                rows={3}
-                placeholder="Add a note for the team…"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                aria-label="New note"
-              />
-              <Button
-                variant="primary"
-                size="sm"
-                className="mt-2"
-                loading={busy}
-                disabled={!note.trim()}
-                onClick={() => void addNote()}
-              >
-                Add note
-              </Button>
-            </div>
-          )}
-
-          {item.notes.length === 0 ? (
-            <p className="text-sm text-faint">No notes yet.</p>
-          ) : (
-            <ul className="space-y-3">
-              {item.notes.map((n) => (
-                <li key={n.id} className="rounded-inner border border-line-soft bg-canvas/60 p-3">
-                  <p className="whitespace-pre-wrap text-sm">{n.body}</p>
-                  <p className="mt-2 text-[0.6875rem] text-faint">
-                    {n.author?.name ?? "Unknown"} · {relativeTime(n.createdAt)}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-
-      <Confirm
-        open={confirmDelete}
-        title="Delete this enquiry?"
-        message="The enquiry and its notes are removed permanently."
-        confirmLabel="Delete"
-        destructive
-        busy={busy}
-        onConfirm={() => void remove()}
-        onCancel={() => setConfirmDelete(false)}
-      />
+      )}
     </>
   );
 }

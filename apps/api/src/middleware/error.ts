@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
+import multer from "multer";
 import { AppError, NotFoundError } from "../lib/errors.js";
 import { logger } from "../lib/logger.js";
 import { isProd } from "../config/env.js";
@@ -35,8 +36,44 @@ function fromPrisma(err: unknown): AppError | null {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
+/** Upload-parser failures are the client's problem, not ours. */
+function fromMulter(err: unknown): AppError | null {
+  if (!(err instanceof multer.MulterError)) return null;
+  switch (err.code) {
+    case "LIMIT_FILE_SIZE":
+      return new AppError("That file is larger than the allowed size", 413, "PAYLOAD_TOO_LARGE");
+    case "LIMIT_FILE_COUNT":
+    case "LIMIT_UNEXPECTED_FILE":
+      return new AppError("Unexpected file in the upload", 400, "BAD_REQUEST");
+    case "LIMIT_PART_COUNT":
+    case "LIMIT_FIELD_COUNT":
+    case "LIMIT_FIELD_KEY":
+    case "LIMIT_FIELD_VALUE":
+      return new AppError("The upload has too many or too large form fields", 400, "BAD_REQUEST");
+    default:
+      return new AppError("The upload could not be read", 400, "BAD_REQUEST");
+  }
+}
+
+/**
+ * A multipart body the parser cannot read (a malformed part header, a
+ * truncated form, a missing boundary) is malformed input, not a fault
+ * in the API. busboy raises these as plain Errors, so they are
+ * recognised by message.
+ */
+const MULTIPART_ERRORS =
+  /^(Malformed part header|Unexpected end of (form|multipart data)|Multipart: Boundary not found|Missing Content-Type|Malformed content type)/i;
+
+function fromMultipart(err: unknown): AppError | null {
+  if (err instanceof Error && MULTIPART_ERRORS.test(err.message)) {
+    return new AppError("The upload could not be read", 400, "BAD_REQUEST");
+  }
+  return null;
+}
+
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
-  const mapped = err instanceof AppError ? err : fromPrisma(err);
+  const mapped =
+    err instanceof AppError ? err : (fromMulter(err) ?? fromMultipart(err) ?? fromPrisma(err));
 
   if (mapped) {
     if (mapped.status >= 500) {

@@ -10,7 +10,7 @@ import { useEffect, useRef } from "react";
    events and is hidden on touch and under reduced motion.
    ─────────────────────────────────────────────────────────── */
 
-const HOT = 'a, button, [role="tab"], summary, label, .lift';
+const HOT = 'a, button, [role="tab"], summary, label';
 
 export function CursorGlow() {
   const ref = useRef(null);

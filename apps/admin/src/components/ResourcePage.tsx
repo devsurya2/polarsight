@@ -1,14 +1,52 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { api, ApiError, qs, type Paged } from "@/lib/api";
+/**
+ * One audited CRUD screen, configured per resource.
+ *
+ * The simpler website-content types differ only in their fields and
+ * columns, so they share this screen rather than each re-implementing
+ * loading, empty, error, search, filter, publish and delete states.
+ * Anything with real workflow of its own — programmes, applications,
+ * enquiries, pages — has a purpose-built screen instead.
+ */
+
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+import { api, qs } from "@/lib/api";
+import { useAction, useList } from "@/lib/hooks";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "./Toast";
 import { Confirm, Modal } from "./Modal";
 import {
-  Button, EmptyState, ErrorNote, Input, Loading, PageHeader, Pagination,
-  Select, StatusBadge, Table, Td, Textarea, Th,
+  Button,
+  Card,
+  EmptyState,
+  ErrorNote,
+  FilterSelect,
+  IconButton,
+  Input,
+  PageHeader,
+  Pagination,
+  SearchInput,
+  Select,
+  StatusBadge,
+  StringList,
+  Table,
+  TableSkeleton,
+  Td,
+  Textarea,
+  Th,
+  Toolbar,
+  Tr,
+  type Crumb,
 } from "./ui";
 
-export type FieldKind = "text" | "textarea" | "number" | "select" | "stringList";
+export type FieldKind =
+  | "text"
+  | "textarea"
+  | "number"
+  | "select"
+  | "stringList"
+  | "date"
+  | "slug";
 
 export interface FieldDef {
   name: string;
@@ -21,12 +59,18 @@ export interface FieldDef {
   options?: Array<{ value: string; label: string }>;
   /** Hidden when editing, e.g. an immutable key. */
   createOnly?: boolean;
+  /** Lays the field out beside its neighbour on wide screens. */
+  half?: boolean;
+  /** Groups fields under a heading inside the form. */
+  group?: string;
 }
 
 export interface ColumnDef<T> {
   header: string;
-  render(row: T): React.ReactNode;
+  render(row: T): ReactNode;
   className?: string;
+  /** Column name the API accepts for `sort`. */
+  sortKey?: string;
 }
 
 export interface ResourceConfig<T> {
@@ -39,103 +83,106 @@ export interface ResourceConfig<T> {
   fields: FieldDef[];
   publishable?: boolean;
   searchable?: boolean;
-  /** Defaults applied when opening the create form. */
+  /** Shows an archive action alongside publish. */
+  archivable?: boolean;
   defaults?: Record<string, unknown>;
+  breadcrumbs?: Crumb[];
+  /** Rendered above the table, e.g. a policy note. */
+  notice?: ReactNode;
+  /** Extra row actions, before edit and delete. */
+  rowActions?: (row: T, helpers: { reload(): void }) => ReactNode;
+  emptyHint?: string;
 }
 
 type Row = Record<string, unknown> & { id: string; status?: string };
 
-function initialValues(fields: FieldDef[], defaults: Record<string, unknown> = {}): Record<string, string> {
-  const out: Record<string, string> = {};
+/* ── Form value plumbing ──────────────────────────────────── */
+
+function initialValues(
+  fields: FieldDef[],
+  source: Record<string, unknown> = {}
+): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
   for (const f of fields) {
-    const d = defaults[f.name];
-    out[f.name] = f.kind === "stringList"
-      ? Array.isArray(d) ? (d as string[]).join("\n") : ""
-      : d === undefined || d === null ? "" : String(d);
+    const v = source[f.name];
+    if (f.kind === "stringList") {
+      out[f.name] = Array.isArray(v) ? (v as string[]) : [];
+    } else if (f.kind === "date") {
+      // <input type="date"> needs yyyy-mm-dd, not an ISO timestamp.
+      out[f.name] = typeof v === "string" && v ? v.slice(0, 10) : "";
+    } else {
+      out[f.name] = v === undefined || v === null ? "" : String(v);
+    }
   }
   return out;
 }
 
-function toPayload(fields: FieldDef[], values: Record<string, string>, editing: boolean) {
+function toPayload(
+  fields: FieldDef[],
+  values: Record<string, string | string[]>,
+  editing: boolean
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of fields) {
     if (editing && f.createOnly) continue;
-    const raw = (values[f.name] ?? "").trim();
+    const raw = values[f.name];
 
     if (f.kind === "stringList") {
-      out[f.name] = raw ? raw.split("\n").map((s) => s.trim()).filter(Boolean) : [];
+      out[f.name] = Array.isArray(raw) ? raw : [];
       continue;
     }
+
+    const text = typeof raw === "string" ? raw.trim() : "";
+
     if (f.kind === "number") {
-      // Empty optional number means "clear it", not "zero".
-      out[f.name] = raw === "" ? null : Number(raw);
+      // An empty optional number means "clear it", not "zero".
+      out[f.name] = text === "" ? null : Number(text);
       continue;
     }
-    if (raw === "" && !f.required) {
+    if (f.kind === "date") {
+      out[f.name] = text === "" ? null : new Date(`${text}T00:00:00`).toISOString();
+      continue;
+    }
+    if (text === "" && !f.required) {
       out[f.name] = null;
       continue;
     }
-    out[f.name] = raw;
+    out[f.name] = text;
   }
   return out;
 }
+
+const slugify = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+/* ── Screen ───────────────────────────────────────────────── */
 
 export function ResourcePage<T extends Row>({ config }: { config: ResourceConfig<T> }) {
   const { can } = useAuth();
   const { notify } = useToast();
+  const { run, isBusy } = useAction();
+  const [params, setParams] = useSearchParams();
 
-  const [data, setData] = useState<Paged<T> | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
+  const list = useList<T>(config.path, {
+    status: params.get("status") ?? "",
+    sort: "",
+    dir: "asc",
+  });
 
   const [editing, setEditing] = useState<T | null>(null);
   const [creating, setCreating] = useState(false);
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<Record<string, string | string[]>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-
   const [confirming, setConfirming] = useState<T | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
 
   const canWrite = can(config.permissions.write);
   const canRemove = can(config.permissions.remove ?? config.permissions.write);
   const canPublish = can(config.permissions.publish ?? config.permissions.write);
-
-  const query = useMemo(
-    () => qs({ page, perPage: 20, search: search || undefined, status: status || undefined }),
-    [page, search, status]
-  );
-
-  const load = useCallback(
-    async (signal?: AbortSignal) => {
-      try {
-        setLoadError(null);
-        setData(await api.get<Paged<T>>(`${config.path}${query}`, signal));
-      } catch (e) {
-        if (!signal?.aborted) setLoadError(e instanceof Error ? e.message : "Failed to load");
-      }
-    },
-    [config.path, query]
-  );
-
-  useEffect(() => {
-    const ac = new AbortController();
-    void load(ac.signal);
-    return () => ac.abort();
-  }, [load]);
-
-  // Debounce the search box so typing does not fire a request per key.
-  const [searchInput, setSearchInput] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setSearch(searchInput);
-      setPage(1);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
 
   const openCreate = () => {
     setValues(initialValues(config.fields, config.defaults));
@@ -143,6 +190,17 @@ export function ResourcePage<T extends Row>({ config }: { config: ResourceConfig
     setFieldErrors({});
     setCreating(true);
   };
+
+  // A ?new=1 link from the dashboard opens the create form directly.
+  useEffect(() => {
+    if (params.get("new") === "1" && canWrite) {
+      openCreate();
+      const next = new URLSearchParams(params);
+      next.delete("new");
+      setParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, canWrite]);
 
   const openEdit = (row: T) => {
     setValues(initialValues(config.fields, row));
@@ -158,251 +216,445 @@ export function ResourcePage<T extends Row>({ config }: { config: ResourceConfig
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    setSaving(true);
     setFormError(null);
     setFieldErrors({});
 
     const isEdit = editing !== null;
     const payload = toPayload(config.fields, values, isEdit);
 
-    try {
-      if (isEdit) {
-        await api.patch(`${config.path}/${editing.id}`, payload);
-        notify(`${config.singular} updated`);
-      } else {
-        await api.post(config.path, payload);
-        notify(`${config.singular} created as draft`);
-      }
+    const result = await run("save", () =>
+      isEdit ? api.patch(`${config.path}/${editing.id}`, payload) : api.post(config.path, payload)
+    );
+
+    if (result.ok) {
+      notify(
+        isEdit
+          ? `${config.singular} updated`
+          : config.publishable
+            ? `${config.singular} created as a draft`
+            : `${config.singular} created`
+      );
       closeForm();
-      await load();
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setFormError(err.message);
-        setFieldErrors(err.fieldErrors);
-      } else {
-        setFormError("Something went wrong");
-      }
-    } finally {
-      setSaving(false);
+      await list.reload();
+    } else {
+      setFormError(result.error);
+      setFieldErrors(result.fields);
     }
   };
 
-  const togglePublish = async (row: T) => {
-    const next = row.status === "PUBLISHED" ? "unpublish" : "publish";
-    setBusyId(row.id);
-    try {
-      await api.post(`${config.path}/${row.id}/${next}`);
-      notify(next === "publish" ? `${config.singular} published` : `${config.singular} unpublished`);
-      await load();
-    } catch (err) {
-      notify(err instanceof Error ? err.message : "Failed", "error");
-    } finally {
-      setBusyId(null);
+  const transition = async (row: T, action: "publish" | "unpublish" | "archive" | "unarchive") => {
+    const result = await run(row.id, () => api.post(`${config.path}/${row.id}/${action}`));
+    if (result.ok) {
+      notify(`${config.singular} ${action === "unarchive" ? "restored to draft" : `${action}ed`}`);
+      await list.reload();
+    } else {
+      notify(result.error, "error");
     }
   };
 
   const remove = async () => {
     if (!confirming) return;
-    setSaving(true);
-    try {
-      await api.del(`${config.path}/${confirming.id}`);
+    const result = await run("delete", () => api.del(`${config.path}/${confirming.id}`));
+    if (result.ok) {
       notify(`${config.singular} deleted`);
       setConfirming(null);
-      await load();
-    } catch (err) {
-      notify(err instanceof Error ? err.message : "Failed to delete", "error");
-    } finally {
-      setSaving(false);
+      await list.reload();
+    } else {
+      notify(result.error, "error");
     }
   };
 
+  const toggleSort = (key: string) => {
+    const current = String(list.filters.sort ?? "");
+    const dir = String(list.filters.dir ?? "asc");
+    list.setFilter({
+      sort: key,
+      dir: current === key && dir === "asc" ? "desc" : "asc",
+    });
+  };
+
   const formFields = config.fields.filter((f) => !(editing && f.createOnly));
+  const grouped = useMemo(() => groupFields(formFields), [formFields]);
+
+  const showing = list.items;
+  const statusValue = String(list.filters.status ?? "");
 
   return (
     <>
       <PageHeader
         title={config.title}
         description={config.description}
+        breadcrumbs={config.breadcrumbs}
         actions={
           canWrite ? (
-            <Button variant="primary" onClick={openCreate}>
+            <Button variant="primary" icon="plus" onClick={openCreate}>
               New {config.singular.toLowerCase()}
             </Button>
           ) : null
         }
       />
 
-      <div className="mb-4 flex flex-wrap gap-3">
+      {config.notice && <div className="mb-4">{config.notice}</div>}
+
+      <Toolbar>
         {config.searchable !== false && (
-          <input
-            className="field max-w-xs"
-            placeholder="Search…"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            aria-label={`Search ${config.title.toLowerCase()}`}
+          <SearchInput
+            value={list.searchInput}
+            onChange={list.setSearchInput}
+            placeholder={`Search ${config.title.toLowerCase()}…`}
           />
         )}
         {config.publishable && (
-          <select
-            className="field max-w-[11rem]"
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
-              setPage(1);
-            }}
-            aria-label="Filter by status"
-          >
-            <option value="">All statuses</option>
-            <option value="PUBLISHED">Published</option>
-            <option value="DRAFT">Draft</option>
-          </select>
+          <FilterSelect
+            label="Status"
+            value={statusValue}
+            onChange={(v) => list.setFilter({ status: v })}
+            allLabel="All statuses"
+            options={[
+              { value: "PUBLISHED", label: "Published" },
+              { value: "DRAFT", label: "Draft" },
+              ...(config.archivable ? [{ value: "ARCHIVED", label: "Archived" }] : []),
+            ]}
+          />
         )}
-      </div>
+        {list.filtered && (
+          <Button size="sm" icon="close" onClick={list.clearFilters} className="mb-px">
+            Clear filters
+          </Button>
+        )}
+        <span className="mb-2 ml-auto text-xs text-faint">
+          {list.pagination ? `${list.pagination.total.toLocaleString()} total` : ""}
+        </span>
+      </Toolbar>
 
-      {loadError && <ErrorNote message={loadError} />}
+      {list.error && <ErrorNote message={list.error} onRetry={list.reload} />}
 
-      {!data && !loadError ? (
-        <Loading />
-      ) : data && data.items.length === 0 ? (
-        <div className="panel">
+      {list.initial ? (
+        <TableSkeleton cols={config.columns.length + 2} />
+      ) : showing.length === 0 ? (
+        <Card padded={false}>
           <EmptyState
-            title={search || status ? "Nothing matches those filters" : `No ${config.title.toLowerCase()} yet`}
-            hint={search || status ? "Try clearing the search or status filter." : undefined}
+            icon="info"
+            title={
+              list.filtered
+                ? "Nothing matches those filters"
+                : `No ${config.title.toLowerCase()} yet`
+            }
+            hint={
+              list.filtered
+                ? "Try clearing the search or status filter."
+                : (config.emptyHint ?? undefined)
+            }
             action={
-              canWrite && !search && !status ? (
-                <Button variant="primary" onClick={openCreate}>
+              canWrite && !list.filtered ? (
+                <Button variant="primary" icon="plus" onClick={openCreate}>
                   Create the first one
+                </Button>
+              ) : list.filtered ? (
+                <Button size="sm" onClick={list.clearFilters}>
+                  Clear filters
                 </Button>
               ) : undefined
             }
           />
-        </div>
-      ) : data ? (
+        </Card>
+      ) : (
         <>
           <Table>
             <thead>
               <tr>
                 {config.columns.map((c) => (
-                  <Th key={c.header} className={c.className}>{c.header}</Th>
+                  <Th
+                    key={c.header}
+                    className={c.className}
+                    sortable={Boolean(c.sortKey)}
+                    active={c.sortKey === list.filters.sort}
+                    dir={String(list.filters.dir ?? "asc") as "asc" | "desc"}
+                    onSort={c.sortKey ? () => toggleSort(c.sortKey!) : undefined}
+                  >
+                    {c.header}
+                  </Th>
                 ))}
                 {config.publishable && <Th>Status</Th>}
                 <Th className="text-right">Actions</Th>
               </tr>
             </thead>
             <tbody>
-              {data.items.map((row) => (
-                <tr key={row.id} className="transition-colors hover:bg-raised/50">
+              {showing.map((row) => (
+                <Tr key={row.id} busy={isBusy(row.id)}>
                   {config.columns.map((c) => (
-                    <Td key={c.header} className={c.className}>{c.render(row)}</Td>
+                    <Td key={c.header} className={c.className}>
+                      {c.render(row)}
+                    </Td>
                   ))}
                   {config.publishable && (
-                    <Td><StatusBadge status={String(row.status ?? "DRAFT")} /></Td>
+                    <Td>
+                      <StatusBadge status={String(row.status ?? "DRAFT")} />
+                    </Td>
                   )}
                   <Td className="text-right">
-                    <div className="flex justify-end gap-1.5">
-                      {config.publishable && canPublish && (
+                    <div className="flex justify-end gap-1">
+                      {config.rowActions?.(row, { reload: list.reload })}
+
+                      {config.publishable && canPublish && row.status !== "ARCHIVED" && (
                         <Button
                           size="sm"
-                          loading={busyId === row.id}
-                          onClick={() => void togglePublish(row)}
+                          variant={row.status === "PUBLISHED" ? "subtle" : "primary"}
+                          onClick={() =>
+                            void transition(row, row.status === "PUBLISHED" ? "unpublish" : "publish")
+                          }
                         >
                           {row.status === "PUBLISHED" ? "Unpublish" : "Publish"}
                         </Button>
                       )}
+                      {config.archivable && canPublish && row.status === "ARCHIVED" && (
+                        <Button size="sm" onClick={() => void transition(row, "unarchive")}>
+                          Restore
+                        </Button>
+                      )}
+                      {config.archivable && canPublish && row.status !== "ARCHIVED" && (
+                        <IconButton
+                          icon="archive"
+                          label="Archive"
+                          onClick={() => void transition(row, "archive")}
+                        />
+                      )}
                       {canWrite && (
-                        <Button size="sm" onClick={() => openEdit(row)}>Edit</Button>
+                        <IconButton icon="edit" label="Edit" onClick={() => openEdit(row)} />
                       )}
                       {canRemove && (
-                        <Button size="sm" variant="danger" onClick={() => setConfirming(row)}>
-                          Delete
-                        </Button>
+                        <IconButton
+                          icon="trash"
+                          label="Delete"
+                          variant="ghost"
+                          className="hover:text-danger"
+                          onClick={() => setConfirming(row)}
+                        />
                       )}
                     </div>
                   </Td>
-                </tr>
+                </Tr>
               ))}
             </tbody>
           </Table>
 
-          <Pagination
-            page={data.pagination.page}
-            totalPages={data.pagination.totalPages}
-            total={data.pagination.total}
-            onPage={setPage}
-          />
+          {list.pagination && (
+            <Pagination
+              page={list.pagination.page}
+              totalPages={list.pagination.totalPages}
+              total={list.pagination.total}
+              perPage={list.pagination.perPage}
+              onPage={list.setPage}
+            />
+          )}
         </>
-      ) : null}
+      )}
 
+      {/* ── Create / edit form ──────────────────────────── */}
       <Modal
         open={creating || editing !== null}
-        title={editing ? `Edit ${config.singular.toLowerCase()}` : `New ${config.singular.toLowerCase()}`}
-        description={editing ? undefined : "New records are created as drafts."}
+        title={
+          editing
+            ? `Edit ${config.singular.toLowerCase()}`
+            : `New ${config.singular.toLowerCase()}`
+        }
+        description={
+          editing
+            ? undefined
+            : config.publishable
+              ? "Created as a draft. It will not appear on the website until you publish it."
+              : undefined
+        }
         onClose={closeForm}
-        wide
+        width="lg"
         footer={
           <>
-            <Button onClick={closeForm} disabled={saving}>Cancel</Button>
-            <Button variant="primary" form="resource-form" type="submit" loading={saving}>
+            <Button onClick={closeForm} disabled={isBusy("save")}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              form="resource-form"
+              type="submit"
+              icon="check"
+              loading={isBusy("save")}
+            >
               {editing ? "Save changes" : "Create"}
             </Button>
           </>
         }
       >
-        <form id="resource-form" onSubmit={submit} className="space-y-4" noValidate>
+        <form id="resource-form" onSubmit={submit} className="space-y-5" noValidate>
           {formError && <ErrorNote message={formError} />}
 
-          {formFields.map((f) => {
-            const common = {
-              label: f.label,
-              required: f.required,
-              hint: f.hint,
-              error: fieldErrors[f.name],
-              value: values[f.name] ?? "",
-              placeholder: f.placeholder,
-              onChange: (e: { target: { value: string } }) =>
-                setValues((v) => ({ ...v, [f.name]: e.target.value })),
-            };
-
-            if (f.kind === "textarea") return <Textarea key={f.name} {...common} rows={f.rows ?? 4} />;
-            if (f.kind === "stringList")
-              return (
-                <Textarea
-                  key={f.name}
-                  {...common}
-                  rows={f.rows ?? 4}
-                  hint={f.hint ?? "One per line."}
-                />
-              );
-            if (f.kind === "select")
-              return (
-                <Select key={f.name} {...common}>
-                  <option value="">Select…</option>
-                  {f.options?.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </Select>
-              );
-            return (
-              <Input
-                key={f.name}
-                {...common}
-                type={f.kind === "number" ? "number" : "text"}
-              />
-            );
-          })}
+          {grouped.map(({ heading, fields }) => (
+            <div key={heading ?? "_"} className="space-y-4">
+              {heading && (
+                <p className="label border-b border-line-soft pb-2">{heading}</p>
+              )}
+              <div className="grid gap-4 sm:grid-cols-2">
+                {fields.map((f) => (
+                  <div key={f.name} className={f.half ? "" : "sm:col-span-2"}>
+                    {renderField(f, values, setValues, fieldErrors, config.fields)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </form>
       </Modal>
 
       <Confirm
         open={confirming !== null}
         title={`Delete this ${config.singular.toLowerCase()}?`}
-        message="This cannot be undone. The record is removed permanently."
+        message={`"${describe(confirming, config.columns)}" will be removed permanently.`}
+        warning={
+          config.publishable
+            ? "If it is published, unpublish or archive it first — deleting published content removes it from the website immediately."
+            : "This cannot be undone."
+        }
         confirmLabel="Delete"
         destructive
-        busy={saving}
+        busy={isBusy("delete")}
         onConfirm={() => void remove()}
         onCancel={() => setConfirming(null)}
       />
     </>
   );
 }
+
+/* ── Field rendering ──────────────────────────────────────── */
+
+function renderField(
+  f: FieldDef,
+  values: Record<string, string | string[]>,
+  setValues: React.Dispatch<React.SetStateAction<Record<string, string | string[]>>>,
+  errors: Record<string, string>,
+  allFields: FieldDef[]
+) {
+  const error = errors[f.name];
+  const stringValue = typeof values[f.name] === "string" ? (values[f.name] as string) : "";
+
+  const set = (next: string | string[]) => setValues((v) => ({ ...v, [f.name]: next }));
+
+  if (f.kind === "stringList") {
+    return (
+      <StringList
+        label={f.label}
+        hint={f.hint}
+        error={error}
+        rows={f.rows ?? 5}
+        placeholder={f.placeholder}
+        value={Array.isArray(values[f.name]) ? (values[f.name] as string[]) : []}
+        onChange={set}
+      />
+    );
+  }
+
+  if (f.kind === "textarea") {
+    return (
+      <Textarea
+        label={f.label}
+        hint={f.hint}
+        error={error}
+        required={f.required}
+        rows={f.rows ?? 4}
+        placeholder={f.placeholder}
+        value={stringValue}
+        aside={stringValue ? `${stringValue.length} characters` : undefined}
+        onChange={(e) => set(e.target.value)}
+      />
+    );
+  }
+
+  if (f.kind === "select") {
+    return (
+      <Select
+        label={f.label}
+        hint={f.hint}
+        error={error}
+        required={f.required}
+        value={stringValue}
+        onChange={(e) => set(e.target.value)}
+      >
+        <option value="">Select…</option>
+        {f.options?.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </Select>
+    );
+  }
+
+  if (f.kind === "slug") {
+    // Offers to derive the slug from the name, rather than silently
+    // overwriting something an editor may have set on purpose.
+    const nameField = allFields.find((x) => x.name === "name" || x.name === "title");
+    const source = nameField
+      ? typeof values[nameField.name] === "string"
+        ? (values[nameField.name] as string)
+        : ""
+      : "";
+    const suggestion = slugify(source);
+    return (
+      <div>
+        <Input
+          label={f.label}
+          hint={f.hint}
+          error={error}
+          required={f.required}
+          placeholder={f.placeholder}
+          value={stringValue}
+          onChange={(e) => set(slugify(e.target.value))}
+        />
+        {suggestion && suggestion !== stringValue && (
+          <button
+            type="button"
+            onClick={() => set(suggestion)}
+            className="mt-1.5 text-xs text-accent-ice underline-offset-2 hover:underline"
+          >
+            Use “{suggestion}”
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <Input
+      label={f.label}
+      hint={f.hint}
+      error={error}
+      required={f.required}
+      placeholder={f.placeholder}
+      type={f.kind === "number" ? "number" : f.kind === "date" ? "date" : "text"}
+      value={stringValue}
+      onChange={(e) => set(e.target.value)}
+    />
+  );
+}
+
+function groupFields(fields: FieldDef[]) {
+  const out: Array<{ heading: string | null; fields: FieldDef[] }> = [];
+  for (const f of fields) {
+    const heading = f.group ?? null;
+    const last = out[out.length - 1];
+    if (last && last.heading === heading) last.fields.push(f);
+    else out.push({ heading, fields: [f] });
+  }
+  return out;
+}
+
+/** A readable label for a row, used in the delete confirmation. */
+function describe<T extends Row>(row: T | null, columns: ColumnDef<T>[]): string {
+  if (!row) return "";
+  for (const key of ["name", "title", "question", "label", "key", "slug"]) {
+    const v = row[key];
+    if (typeof v === "string" && v) return v.length > 60 ? `${v.slice(0, 60)}…` : v;
+  }
+  void columns;
+  return row.id;
+}
+
+export { qs };

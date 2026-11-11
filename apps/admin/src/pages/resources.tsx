@@ -1,166 +1,218 @@
-import { ResourcePage, type ResourceConfig } from "@/components/ResourcePage";
-import { Badge } from "@/components/ui";
+/**
+ * Resources that are a straightforward audited CRUD screen.
+ *
+ * A thin configuration over <ResourcePage>, so behaviour stays
+ * identical with the rest of the portal. Anything with real workflow of
+ * its own — pages, programmes, applications, enquiries, media — has a
+ * purpose-built screen instead.
+ */
 
-/* Each resource is a thin configuration over one audited CRUD screen,
-   so behaviour stays identical across the website content types. */
+import { Link } from "react-router-dom";
+import { ResourcePage, type ResourceConfig } from "@/components/ResourcePage";
+import { Badge, LinkButton, Notice, humanise } from "@/components/ui";
+import { formatDate } from "@/lib/format";
 
 type Row = Record<string, unknown> & { id: string; status?: string };
 
-const truncate = (v: unknown, n = 70) => {
-  const s = v === null || v === undefined ? "" : String(v);
-  return s.length > n ? `${s.slice(0, n)}…` : s || "—";
+const sortOrderField = {
+  name: "sortOrder",
+  label: "Display order",
+  kind: "number" as const,
+  hint: "Lower numbers appear first on the website.",
+  half: true,
 };
 
-const programmes: ResourceConfig<Row> = {
-  path: "/programmes",
-  title: "Programmes",
-  description: "Training tracks shown on the website. Only published tracks are public.",
-  singular: "Programme",
+/* ── Job openings ─────────────────────────────────────────── */
+
+const EMPLOYMENT_TYPES = [
+  { value: "FULL_TIME", label: "Full-time" },
+  { value: "PART_TIME", label: "Part-time" },
+  { value: "CONTRACT", label: "Contract" },
+  { value: "GUEST_TRAINER", label: "Guest Trainer" },
+  { value: "INDUSTRY_EXPERT", label: "Industry Expert" },
+];
+
+const WORK_MODES = [
+  { value: "ON_CAMPUS", label: "On-campus" },
+  { value: "REMOTE", label: "Remote" },
+  { value: "HYBRID", label: "Hybrid" },
+];
+
+const jobs: ResourceConfig<Row> = {
+  path: "/jobs",
+  title: "Job openings",
+  description:
+    "Trainer, mentor and content roles. Only published openings appear on the public careers page, and an opening past its deadline is treated as closed.",
+  singular: "Job opening",
   permissions: {
-    read: "programme:read",
-    write: "programme:write",
-    remove: "programme:delete",
-    publish: "programme:publish",
+    read: "job:read",
+    write: "job:write",
+    remove: "job:delete",
+    publish: "job:publish",
   },
   publishable: true,
+  archivable: true,
+  breadcrumbs: [{ label: "Recruitment" }, { label: "Job openings" }],
+  emptyHint: "Create an opening to start accepting trainer applications through the website.",
+  notice: (
+    <Notice tone="caution" icon="info">
+      Nothing here states a salary, a start date or a headcount. Keep it that way unless the business
+      has agreed those terms.
+    </Notice>
+  ),
   columns: [
-    { header: "Code", render: (r) => <span className="font-mono text-xs text-faint">{String(r.code)}</span> },
-    { header: "Name", render: (r) => <span className="font-medium">{String(r.name)}</span> },
-    { header: "Tag", render: (r) => <Badge>{String(r.tag)}</Badge> },
-    { header: "Duration", render: (r) => (r.durationWeeks ? `${r.durationWeeks} weeks` : "—") },
-    { header: "Level", render: (r) => String(r.level ?? "—") },
+    {
+      header: "Title",
+      sortKey: "title",
+      render: (r) => (
+        <div className="min-w-0">
+          <p className="truncate font-medium">{String(r.title)}</p>
+          <p className="mono truncate text-faint">{String(r.slug)}</p>
+        </div>
+      ),
+    },
+    { header: "Department", sortKey: "department", render: (r) => <Badge>{String(r.department)}</Badge> },
+    {
+      header: "Arrangement",
+      render: (r) => (
+        <span className="text-xs text-body">
+          {humanise(String(r.employmentType))} · {humanise(String(r.workMode))}
+        </span>
+      ),
+    },
+    {
+      header: "Deadline",
+      sortKey: "applicationDeadline",
+      render: (r) => {
+        if (!r.applicationDeadline) return <span className="text-xs text-faint">Open-ended</span>;
+        const date = new Date(String(r.applicationDeadline));
+        const past = date.getTime() < Date.now();
+        return (
+          <span className={`text-xs ${past ? "text-danger" : "text-body"}`}>
+            {formatDate(date)}
+            {past && " (passed)"}
+          </span>
+        );
+      },
+    },
+    {
+      header: "Applications",
+      render: (r) => {
+        const count = (r._count as { applications?: number } | undefined)?.applications ?? 0;
+        return count > 0 ? (
+          <Link
+            to={`/applications?jobOpeningId=${r.id}`}
+            className="tabular text-sm text-accent-ice underline-offset-2 hover:underline"
+          >
+            {count}
+          </Link>
+        ) : (
+          <span className="text-xs text-faint">0</span>
+        );
+      },
+    },
   ],
+  rowActions: (row) => {
+    const count = (row._count as { applications?: number } | undefined)?.applications ?? 0;
+    if (count === 0) return null;
+    return (
+      <LinkButton to={`/applications?jobOpeningId=${row.id}`} size="sm" variant="ghost" icon="users">
+        <span className="sr-only">View applications</span>
+      </LinkButton>
+    );
+  },
   fields: [
-    { name: "code", label: "Code", kind: "text", required: true, placeholder: "TRK-05" },
-    { name: "slug", label: "Slug", kind: "text", required: true, hint: "Lowercase letters, digits and hyphens. Used in the URL.", placeholder: "threat-hunting" },
-    { name: "name", label: "Name", kind: "text", required: true },
-    { name: "tag", label: "Category", kind: "text", required: true, placeholder: "Security Operations" },
-    { name: "summary", label: "Summary", kind: "textarea", required: true, rows: 3 },
-    { name: "body", label: "Full description", kind: "textarea", rows: 6 },
-    { name: "points", label: "Bullet points", kind: "stringList", rows: 5 },
-    { name: "durationWeeks", label: "Duration in weeks", kind: "number" },
-    { name: "level", label: "Level", kind: "select", options: [
-      { value: "Entry", label: "Entry" },
-      { value: "Intermediate", label: "Intermediate" },
-      { value: "Advanced", label: "Advanced" },
-    ] },
-    { name: "sortOrder", label: "Sort order", kind: "number", hint: "Lower numbers appear first." },
+    { name: "title", label: "Job title", kind: "text", required: true, half: true },
+    {
+      name: "slug",
+      label: "Slug",
+      kind: "slug",
+      required: true,
+      half: true,
+      hint: "Used in the public URL.",
+      placeholder: "soc-analyst-trainer",
+    },
+    { name: "department", label: "Department", kind: "text", required: true, half: true },
+    { name: "location", label: "Location", kind: "text", required: true, half: true },
+    {
+      name: "employmentType",
+      label: "Employment type",
+      kind: "select",
+      required: true,
+      half: true,
+      options: EMPLOYMENT_TYPES,
+    },
+    {
+      name: "workMode",
+      label: "Work mode",
+      kind: "select",
+      required: true,
+      half: true,
+      options: WORK_MODES,
+    },
+    {
+      name: "description",
+      label: "Job description",
+      kind: "textarea",
+      required: true,
+      rows: 6,
+      group: "The role",
+    },
+    { name: "responsibilities", label: "Responsibilities", kind: "stringList", group: "The role" },
+    {
+      name: "requiredSkills",
+      label: "Required skills",
+      kind: "stringList",
+      group: "Requirements",
+    },
+    {
+      name: "preferredQualifications",
+      label: "Preferred qualifications",
+      kind: "stringList",
+      group: "Requirements",
+    },
+    { name: "certifications", label: "Certifications", kind: "stringList", group: "Requirements" },
+    {
+      name: "experienceMinYears",
+      label: "Minimum years of experience",
+      kind: "number",
+      half: true,
+      group: "Requirements",
+      hint: "Leave blank if there is no minimum.",
+    },
+    {
+      name: "experienceNote",
+      label: "Experience note",
+      kind: "text",
+      half: true,
+      group: "Requirements",
+      hint: "Any nuance the minimum alone does not capture.",
+    },
+    {
+      name: "applicationInstructions",
+      label: "Application instructions",
+      kind: "textarea",
+      rows: 3,
+      group: "Applying",
+    },
+    {
+      name: "applicationDeadline",
+      label: "Application deadline",
+      kind: "date",
+      half: true,
+      group: "Applying",
+      hint: "After this date the opening stops accepting applications.",
+    },
+    { ...sortOrderField, group: "Applying" },
+    { name: "seoTitle", label: "SEO title", kind: "text", group: "Search listing" },
+    {
+      name: "seoDescription",
+      label: "SEO description",
+      kind: "textarea",
+      rows: 2,
+      group: "Search listing",
+    },
   ],
 };
 
-const content: ResourceConfig<Row> = {
-  path: "/content",
-  title: "Page content",
-  description: "Individual blocks of copy on the public website, addressed by key.",
-  singular: "Content block",
-  permissions: { read: "content:read", write: "content:write" },
-  publishable: true,
-  columns: [
-    { header: "Key", render: (r) => <span className="font-mono text-xs text-accent-ice">{String(r.key)}</span> },
-    { header: "Section", render: (r) => <Badge>{String(r.section)}</Badge> },
-    { header: "Label", render: (r) => String(r.label) },
-    { header: "Value", render: (r) => <span className="text-body">{truncate(r.value)}</span> },
-  ],
-  fields: [
-    { name: "key", label: "Key", kind: "text", required: true, createOnly: true, hint: "Cannot be changed later; the website reads this key.", placeholder: "hero.headline" },
-    { name: "section", label: "Section", kind: "text", required: true, placeholder: "hero" },
-    { name: "label", label: "Label", kind: "text", required: true, hint: "Shown to editors, not on the website." },
-    { name: "type", label: "Type", kind: "select", options: [
-      { value: "TEXT", label: "Plain text" },
-      { value: "RICH_TEXT", label: "Rich text" },
-      { value: "JSON", label: "JSON" },
-    ] },
-    { name: "value", label: "Value", kind: "textarea", required: true, rows: 6 },
-    { name: "sortOrder", label: "Sort order", kind: "number" },
-  ],
-};
-
-const faqs: ResourceConfig<Row> = {
-  path: "/faqs",
-  title: "FAQs",
-  description: "Questions and answers shown on the website.",
-  singular: "FAQ",
-  permissions: { read: "faq:read", write: "faq:write" },
-  publishable: true,
-  columns: [
-    { header: "Question", render: (r) => <span className="font-medium">{truncate(r.question, 80)}</span> },
-    { header: "Answer", render: (r) => <span className="text-body">{truncate(r.answer, 60)}</span> },
-    { header: "Order", render: (r) => String(r.sortOrder ?? 0) },
-  ],
-  fields: [
-    { name: "question", label: "Question", kind: "textarea", required: true, rows: 2 },
-    { name: "answer", label: "Answer", kind: "textarea", required: true, rows: 6 },
-    { name: "category", label: "Category", kind: "text" },
-    { name: "sortOrder", label: "Sort order", kind: "number" },
-  ],
-};
-
-const statistics: ResourceConfig<Row> = {
-  path: "/statistics",
-  title: "Statistics",
-  description:
-    "Figures shown on the website. Publish only numbers you can evidence.",
-  singular: "Statistic",
-  permissions: { read: "statistic:read", write: "statistic:write" },
-  publishable: true,
-  columns: [
-    { header: "Key", render: (r) => <span className="font-mono text-xs text-faint">{String(r.key)}</span> },
-    { header: "Value", render: (r) => <span className="text-lg font-semibold">{String(r.value)}</span> },
-    { header: "Label", render: (r) => String(r.label) },
-  ],
-  fields: [
-    { name: "key", label: "Key", kind: "text", required: true, createOnly: true },
-    { name: "value", label: "Value", kind: "text", required: true, placeholder: "120" },
-    { name: "label", label: "Label", kind: "text", required: true, placeholder: "Students trained" },
-    { name: "sortOrder", label: "Sort order", kind: "number" },
-  ],
-};
-
-const audiences: ResourceConfig<Row> = {
-  path: "/audiences",
-  title: "Who we serve",
-  description: "Audience groups. Not currently shown on the public site.",
-  singular: "Audience",
-  permissions: { read: "audience:read", write: "audience:write" },
-  publishable: true,
-  columns: [
-    { header: "Name", render: (r) => <span className="font-medium">{String(r.name)}</span> },
-    { header: "Heading", render: (r) => <span className="text-body">{truncate(r.heading)}</span> },
-  ],
-  fields: [
-    { name: "slug", label: "Slug", kind: "text", required: true, createOnly: true },
-    { name: "name", label: "Name", kind: "text", required: true },
-    { name: "heading", label: "Heading", kind: "textarea", required: true, rows: 2 },
-    { name: "blurb", label: "Blurb", kind: "textarea", required: true, rows: 4 },
-    { name: "outcome", label: "Outcome line", kind: "text" },
-    { name: "bullets", label: "Bullet points", kind: "stringList" },
-    { name: "sortOrder", label: "Sort order", kind: "number" },
-  ],
-};
-
-const career: ResourceConfig<Row> = {
-  path: "/career",
-  title: "Careers and placement",
-  description: "Copy describing how the programme runs and how placement works.",
-  singular: "Career block",
-  permissions: { read: "career:read", write: "career:write" },
-  publishable: true,
-  columns: [
-    { header: "Key", render: (r) => <span className="font-mono text-xs text-faint">{String(r.key)}</span> },
-    { header: "Title", render: (r) => <span className="font-medium">{String(r.title)}</span> },
-    { header: "Body", render: (r) => <span className="text-body">{truncate(r.body)}</span> },
-  ],
-  fields: [
-    { name: "key", label: "Key", kind: "text", required: true, createOnly: true },
-    { name: "title", label: "Title", kind: "text", required: true },
-    { name: "body", label: "Body", kind: "textarea", required: true, rows: 6 },
-    { name: "sortOrder", label: "Sort order", kind: "number" },
-  ],
-};
-
-export const ProgrammesPage = () => <ResourcePage config={programmes} />;
-export const ContentPage = () => <ResourcePage config={content} />;
-export const FaqsPage = () => <ResourcePage config={faqs} />;
-export const StatisticsPage = () => <ResourcePage config={statistics} />;
-export const AudiencesPage = () => <ResourcePage config={audiences} />;
-export const CareerPage = () => <ResourcePage config={career} />;
+export const JobsPage = () => <ResourcePage config={jobs} />;

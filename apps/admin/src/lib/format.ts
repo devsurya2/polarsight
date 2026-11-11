@@ -54,6 +54,3 @@ export function formatBytes(bytes: number): string {
   }
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`;
 }
-
-export const titleCase = (s: string) =>
-  s.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase());

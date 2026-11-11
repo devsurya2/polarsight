@@ -13,7 +13,9 @@ build/
 # environment — never commit real secrets
 .env
 .env.*
-.env.example
+# The template is the exception: it holds only placeholders, and it
+# is how anyone cloning this repo learns which variables to set.
+!.env.example
 .claude
 .vscode
 requirements.md
@@ -21,6 +23,7 @@ task.md
 # database / storage
 postgres-data/
 uploads/
+private-uploads/
 *.sqlite
 
 # logs
@@ -35,3 +38,6 @@ logs/
 
 # test output
 coverage/
+sbom.cdx.json
+.github
+.gitleaks.toml

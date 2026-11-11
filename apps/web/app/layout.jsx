@@ -26,11 +26,11 @@ const mono = JetBrains_Mono({
 export const metadata = {
   title: "Polarsight | Campus Cybersecurity Training & Placement, India",
   description:
-    "Polarsight runs hands-on cybersecurity training inside colleges. Live attack ranges, graded labs and placement preparation, built with the teams who do the hiring.",
+    "Polarsight runs practical cybersecurity training for college students. Two programmes to begin with: SOC Analyst and AI Security Engineer.",
   openGraph: {
     title: "Polarsight | Where students become defenders",
     description:
-      "Hands-on cybersecurity training delivered on campus, with placement preparation built in.",
+      "Practical cybersecurity training for college students, built around applied work rather than theory alone.",
     type: "website",
   },
 };

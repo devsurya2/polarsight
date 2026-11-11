@@ -1,151 +1,299 @@
 /**
- * Resolves the content the pages render.
+ * Resolves the content every page renders.
  *
- * Shape is identical to content.js, so components need no knowledge of
- * where the values came from. Anything the API does not supply falls
- * back to the built-in copy, key by key, which means a partially
- * populated database still renders a complete page.
+ * The shape handed back is exactly what the components already expect,
+ * so no component needs to know whether a value came from the database
+ * or from the copy built into the site. Anything the API does not
+ * supply falls back key by key, which means:
+ *
+ *  - a partially populated database still renders a complete page
+ *  - an API outage changes nothing a visitor can see
+ *  - a fresh clone with no database at all still builds
+ *
+ * Routing and layout are never taken from the API. Navigation links,
+ * footer link columns and component structure are decided in code, so
+ * no edit in the admin portal can point the site at a dead URL or
+ * remove a section the page depends on.
  */
 
 import * as fallback from "./content.js";
+import * as homeFallback from "./home.js";
+import { aboutPage, careersPage, outcomesPage } from "./pages.js";
+import {
+  programmesIntro,
+  programmes as programmeFallback,
+} from "./programmes.js";
+import {
+  contact as buildTimeContact,
+  social as buildTimeSocial,
+} from "./siteConfig.js";
 import { fetchPublishedSite } from "./api.js";
+import {
+  arr,
+  mergeAbout,
+  mergeCareers,
+  mergeContact,
+  mergeContactPage,
+  mergeHome,
+  mergeOutcomes,
+  mergeProgramme,
+  mergeProgrammesIntro,
+  mergeSocial,
+  pick,
+} from "./merge.js";
 
-/** Prefer a live value, but only when it is actually present. */
-const pick = (live, backup) =>
-  live === undefined || live === null || live === "" ? backup : live;
-
-const arr = (live, backup) =>
-  Array.isArray(live) && live.length > 0 ? live : backup;
-
+/**
+ * Everything the site renders, merged and ready.
+ *
+ * One call per request path, cached by Next for REVALIDATE_SECONDS.
+ */
 export async function getSiteContent() {
   const site = await fetchPublishedSite();
 
-  // No API: hand back the built-in content unchanged.
-  if (!site) return { ...fallback, source: "static" };
+  // No API, or nothing published: hand back the built-in content.
+  const c = site?.content ?? {};
+  const pages = site?.pages ?? {};
+  const settings = site?.settings ?? {};
 
-  const c = site.content ?? {};
-
+  /* ── Homepage first interface ───────────────────────────────
+   *
+   * The hero's copy is editable as content blocks, but its layout,
+   * video, animation and the navigation above it are not represented
+   * in the CMS at all. Nothing below can change them.
+   */
   const hero = {
     ...fallback.hero,
     kicker: pick(c["hero.kicker"], fallback.hero.kicker),
     lines: arr(c["hero.headline"], fallback.hero.lines),
     accent: pick(c["hero.accent"], fallback.hero.accent),
     body: pick(c["hero.body"], fallback.hero.body),
-    primary: pick(c["hero.primaryCta"], fallback.hero.primary),
-    secondary: pick(c["hero.secondaryCta"], fallback.hero.secondary),
-    chips: arr(c["hero.chips"], fallback.hero.chips),
-  };
-
-  const about = {
-    ...fallback.about,
-    kicker: pick(c["about.kicker"], fallback.about.kicker),
-    lead: pick(c["about.lead"], fallback.about.lead),
-    cta: pick(c["about.cta"], fallback.about.cta),
-  };
-
-  const why = {
-    ...fallback.why,
-    kicker: pick(c["why.kicker"], fallback.why.kicker),
-    title: pick(c["why.title"], fallback.why.title),
-    body: pick(c["why.body"], fallback.why.body),
-    items: arr(c["why.items"], fallback.why.items),
-  };
-
-  const shift = {
-    ...fallback.shift,
-    kicker: pick(c["shift.kicker"], fallback.shift.kicker),
-    title: pick(c["shift.title"], fallback.shift.title),
-    items: arr(c["shift.items"], fallback.shift.items),
-  };
-
-  const coverage = {
-    ...fallback.coverage,
-    kicker: pick(c["coverage.kicker"], fallback.coverage.kicker),
-    title: pick(c["coverage.title"], fallback.coverage.title),
-    body: pick(c["coverage.body"], fallback.coverage.body),
-    cities: arr(c["coverage.cities"], fallback.coverage.cities),
-    // Process steps are managed as career content in the admin portal.
-    steps:
-      site.career?.length > 0
-        ? site.career.map((s) => ({ title: s.title, body: s.body }))
-        : fallback.coverage.steps,
-  };
-
-  const cta = {
-    ...fallback.cta,
-    kicker: pick(c["cta.kicker"], fallback.cta.kicker),
-    title: pick(c["cta.title"], fallback.cta.title),
-    body: pick(c["cta.body"], fallback.cta.body),
+    // A button's words are editable; where it goes is not, so only the
+    // label is taken from the CMS and the href stays in code.
+    primary: {
+      ...fallback.hero.primary,
+      label: pick(c["hero.primaryCta"], fallback.hero.primary?.label),
+    },
+    secondary: {
+      ...fallback.hero.secondary,
+      label: pick(c["hero.secondaryCta"], fallback.hero.secondary?.label),
+    },
   };
 
   const brand = {
     ...fallback.brand,
     name: pick(c["brand.name"], fallback.brand.name),
-    email: pick(c["brand.email"], fallback.brand.email),
-    phone: pick(c["brand.phone"], fallback.brand.phone),
     city: pick(c["brand.city"], fallback.brand.city),
     state: pick(c["brand.state"], fallback.brand.state),
   };
 
+  // `columns` is deliberately not read from the database. Like nav, it
+  // is routing rather than editorial copy. The blurb is prose, so that
+  // one stays overridable.
   const footer = {
     ...fallback.footer,
     blurb: pick(c["footer.blurb"], fallback.footer.blurb),
-    columns: arr(c["footer.columns"], fallback.footer.columns),
   };
 
-  const outcomes = {
-    ...fallback.outcomes,
-    kicker: pick(c["outcomes.kicker"], fallback.outcomes.kicker),
-    title: pick(c["outcomes.title"], fallback.outcomes.title),
-    body: pick(c["outcomes.body"], fallback.outcomes.body),
-    // Only published statistics reach this point; when none are
-    // published the section keeps its built-in illustrative cards,
-    // which carry their own "replace before publishing" caveat.
-    items:
-      site.statistics?.length > 0
-        ? site.statistics.map((s) => ({
-            tag: "Figure",
-            name: s.label,
-            detail: s.label,
-            metric: s.value,
-          }))
-        : fallback.outcomes.items,
-  };
+  const contact = mergeContact(settings, buildTimeContact);
+  const social = mergeSocial(settings, buildTimeSocial);
+
+  /* ── Programme cards ────────────────────────────────────── */
 
   const programmes = {
-    ...fallback.programmes,
     items:
-      site.programmes?.length > 0
+      site?.programmes?.length > 0
         ? site.programmes.map((p) => ({
             code: p.code,
             name: p.name,
             tag: p.tag,
-            duration: p.durationWeeks ? `${p.durationWeeks} weeks` : "",
-            level: p.level ?? "",
+            href: `/programmes/${p.slug}`,
+            // Duration and level appear only when actually set.
+            meta: [
+              p.durationWeeks ? `${p.durationWeeks} weeks` : null,
+              p.level || null,
+            ]
+              .filter(Boolean)
+              .join(" · "),
             summary: p.summary,
             points: p.points ?? [],
-            // The mock panel is a design asset, matched by position.
-            mock: fallback.programmes.items[
-              site.programmes.indexOf(p) % fallback.programmes.items.length
-            ]?.mock,
+            image: p.image ?? null,
           }))
-        : fallback.programmes.items,
-  };
-
-  const faq = {
-    ...fallback.faq,
-    items:
-      site.faqs?.length > 0
-        ? site.faqs.map((f) => ({ q: f.question, a: f.answer }))
-        : fallback.faq.items,
+        : // No API. The built-in programme detail is the only copy of
+          // this data in the site, so the cards are derived from it
+          // rather than duplicated.
+          programmeFallback.map((p) => ({
+            code: p.code,
+            name: p.name,
+            tag: p.tag,
+            href: `/programmes/${p.slug}`,
+            meta: "",
+            summary: p.summary,
+            points: p.skills?.slice(0, 4) ?? [],
+            image: null,
+          })),
   };
 
   return {
-    ...fallback,
-    source: "api",
-    brand, hero, about, why, shift, coverage, cta, footer,
-    outcomes, programmes, faq,
-    nav: arr(c["nav.items"], fallback.nav),
-    marquee: arr(c["marquee.items"], fallback.marquee),
+    source: site ? "api" : "static",
+
+    // First interface, and site chrome
+    hero,
+    brand,
+    footer,
+    // Routing, decided in code. Never read from the database, so no
+    // edit in the portal can point the site at a URL that does not
+    // exist.
+    nav: fallback.nav,
+    contact,
+    social,
+
+    // Shared collections
+    programmes,
+    jobs: site?.jobs ?? [],
+    // Kept so a preview can rebuild the homepage cards the same way.
+    programmesRaw: site?.programmes ?? [],
+
+    // Page documents, merged over their built-in copy
+    pages: {
+      home: homeWithLiveProgrammes(
+        mergeHome(pages.home?.content, homeFallback),
+        site?.programmes,
+      ),
+      about: mergeAbout(pages.about?.content, aboutPage),
+      outcomes: mergeOutcomes(pages.outcomes?.content, outcomesPage),
+      careers: mergeCareers(pages.careers?.content, careersPage, site?.jobs),
+      programmes: mergeProgrammesIntro(
+        pages.programmes?.content,
+        programmesIntro,
+      ),
+      contact: mergeContactPage(pages.contact?.content),
+    },
+
+    // SEO metadata set per page in the admin portal
+    seo: Object.fromEntries(
+      Object.entries(pages).map(([key, page]) => [
+        key,
+        {
+          title: page?.seoTitle ?? null,
+          description: page?.seoDescription ?? null,
+        },
+      ]),
+    ),
   };
+}
+
+/**
+ * Puts the published programmes into the homepage's programme cards.
+ *
+ * The cards' illustrations are design assets held in the site, not
+ * content, so they are matched by position rather than fetched. A
+ * programme with its own cover image uses that instead.
+ */
+function homeWithLiveProgrammes(home, live) {
+  if (!Array.isArray(live) || live.length === 0) return home;
+
+  const builtIn = homeFallback.programmes.items;
+
+  return {
+    ...home,
+    programmes: {
+      ...home.programmes,
+      items: live.map((p, i) => ({
+        ...(builtIn[i % builtIn.length] ?? {}),
+        code: p.code,
+        name: p.name,
+        tag: p.tag,
+        href: `/programmes/${p.slug}`,
+        body: p.summary,
+        areas: arr(p.points, builtIn[i % builtIn.length]?.areas ?? []),
+        image: p.image?.url
+          ? {
+              src: p.image.url,
+              alt: p.image.alt ?? "",
+              width: p.image.width ?? 1200,
+              height: p.image.height ?? 750,
+            }
+          : (builtIn[i % builtIn.length]?.image ?? null),
+      })),
+    },
+  };
+}
+
+/**
+ * Resolves a page's content, honouring an editor's preview link.
+ *
+ * `searchParams` comes from the admin portal's "Preview draft" button
+ * and carries a signed, ten-minute token. The API verifies it and
+ * returns the draft; without a valid token it returns nothing and this
+ * falls through to the published content, exactly as it would for a
+ * visitor who guessed the URL.
+ *
+ * Returns `{ content, isPreview }` so a page can say plainly that it
+ * is showing unpublished work.
+ */
+export async function getPageContent(key, searchParams, site) {
+  const content = site ?? (await getSiteContent());
+  const published = content.pages?.[key] ?? null;
+
+  const params = (await searchParams) ?? {};
+  const token = params.token;
+  const expires = params.expires;
+  const previewing =
+    params.preview === "1" && typeof token === "string" && expires;
+
+  if (!previewing) return { content: published, isPreview: false };
+
+  const { fetchPreview } = await import("./api.js");
+  const result = await fetchPreview(key, token, expires);
+  const draft = result?.item?.content;
+  if (!draft) return { content: published, isPreview: false };
+
+  // The same merge the published path uses, so a preview renders
+  // through exactly the code a visitor will get.
+  const merged = {
+    home: () =>
+      homeWithLiveProgrammes(
+        mergeHome(draft, homeFallback),
+        content.programmesRaw,
+      ),
+    about: () => mergeAbout(draft, aboutPage),
+    outcomes: () => mergeOutcomes(draft, outcomesPage),
+    careers: () => mergeCareers(draft, careersPage, content.jobs),
+    programmes: () => mergeProgrammesIntro(draft, programmesIntro),
+    contact: () => mergeContactPage(draft),
+  }[key];
+
+  return { content: merged ? merged() : published, isPreview: true };
+}
+
+/**
+ * One programme's full detail.
+ *
+ * Returns null when the slug is not a published programme, so the page
+ * can render a 404 rather than an empty shell. A programme that exists
+ * in the built-in content but is not published in the database is
+ * still treated as missing: the database decides what is public.
+ */
+export async function getProgramme(slug, site) {
+  const content = site ?? (await getSiteContent());
+  const builtIn = programmeFallback.find((p) => p.slug === slug) ?? null;
+
+  const { fetchProgramme } = await import("./api.js");
+  const result = await fetchProgramme(slug);
+
+  if (result?.item) return mergeProgramme(result.item, builtIn);
+
+  // No API. Fall back to the built-in detail so a local build without
+  // a database still renders, but only for a programme the site knows
+  // about.
+  if (content.source === "static" && builtIn) return builtIn;
+
+  return null;
+}
+
+/** Slugs to pre-render, from whichever source is available. */
+export async function getProgrammeSlugs() {
+  const site = await fetchPublishedSite();
+  if (site?.programmes?.length) return site.programmes.map((p) => p.slug);
+  return programmeFallback.map((p) => p.slug);
 }

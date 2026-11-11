@@ -33,16 +33,38 @@ export const loginLimiter = rateLimit({
   },
 });
 
+/**
+ * Sign-in attempts per address, whatever the account. The per-account
+ * limiter above stops a botnet on one account; this stops one host
+ * spraying a password across every account.
+ */
+export const loginIpLimiter = rateLimit({
+  ...shared,
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  limit: env.LOGIN_IP_RATE_LIMIT_MAX,
+  skipSuccessfulRequests: true,
+});
+
 /** Public contact form: generous enough for humans, not for scripts. */
 export const enquiryLimiter = rateLimit({
   ...shared,
   windowMs: 60 * 60 * 1000,
-  limit: 10,
+  limit: env.ENQUIRY_RATE_LIMIT_MAX,
+});
+
+/**
+ * Public trainer applications. Tighter than the contact form: each
+ * submission can carry a resume, so it costs storage as well as a row.
+ */
+export const applicationLimiter = rateLimit({
+  ...shared,
+  windowMs: 60 * 60 * 1000,
+  limit: env.APPLICATION_RATE_LIMIT_MAX,
 });
 
 /** Uploads are expensive, so they get their own ceiling. */
 export const uploadLimiter = rateLimit({
   ...shared,
   windowMs: 15 * 60 * 1000,
-  limit: 40,
+  limit: env.UPLOAD_RATE_LIMIT_MAX,
 });

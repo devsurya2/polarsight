@@ -8,27 +8,30 @@ import { logger } from "./lib/logger.js";
 import { apiRouter } from "./routes/index.js";
 import { errorHandler, notFound } from "./middleware/error.js";
 import { apiLimiter } from "./middleware/rateLimit.js";
-import { localUploadDir } from "./lib/storage.js";
+import { csrfGuard } from "./middleware/csrf.js";
+import { ForbiddenError } from "./lib/errors.js";
+import { publicUploadDir } from "./lib/storage.js";
 
 export function createApp() {
   const app = express();
 
-  // Needed for correct client addresses behind a proxy, which the
-  // rate limiters depend on.
-  app.set("trust proxy", 1);
+  // Only trust X-Forwarded-For when there is actually a proxy setting
+  // it. Trusting it unconditionally lets any client choose the address
+  // the rate limiters and audit log see.
+  app.set("trust proxy", env.TRUST_PROXY ? 1 : false);
   app.disable("x-powered-by");
 
   app.use(
     helmet({
       contentSecurityPolicy: {
         directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'"],
+          defaultSrc: ["'none'"],
           imgSrc: ["'self'", "data:", "blob:"],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],
-          baseUri: ["'self'"],
-          formAction: ["'self'"],
+          baseUri: ["'none'"],
+          formAction: ["'none'"],
+          sandbox: [],
         },
       },
       crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -44,10 +47,11 @@ export function createApp() {
         if (!origin) return callback(null, true);
         if (env.CORS_ORIGINS.includes(origin)) return callback(null, true);
         logger.warn({ origin }, "blocked by CORS");
-        return callback(new Error("Not allowed by CORS"));
+        return callback(new ForbiddenError("Origin not allowed"));
       },
       credentials: true,
       methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+      maxAge: 600,
     })
   );
 
@@ -65,26 +69,28 @@ export function createApp() {
   );
 
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", uptime: process.uptime() });
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ status: "ok" });
   });
 
-  // Uploaded files in local development. Served with a restrictive
-  // disposition so nothing can be executed in a browser context.
-  if (env.STORAGE_DRIVER === "local") {
-    app.use(
-      "/media",
-      express.static(localUploadDir, {
-        index: false,
-        dotfiles: "deny",
-        setHeaders(res) {
-          res.setHeader("X-Content-Type-Options", "nosniff");
-          res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
-        },
-      })
-    );
-  }
+  // Public, scanned uploads only. The private directory (resumes and
+  // everything still in quarantine) is a different path that nothing
+  // here mounts, so no URL reaches it.
+  app.use(
+    "/media",
+    express.static(publicUploadDir, {
+      index: false,
+      dotfiles: "deny",
+      redirect: false,
+      setHeaders(res) {
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+        res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      },
+    })
+  );
 
-  app.use("/api", apiLimiter, apiRouter);
+  app.use("/api", apiLimiter, csrfGuard, apiRouter);
 
   app.use(notFound);
   app.use(errorHandler);

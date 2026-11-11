@@ -67,24 +67,6 @@ export function Heading({
   );
 }
 
-/* Card: the single small surface used across the page */
-export function Card({ children, className = "", lift = false, as: Tag = "div" }) {
-  return (
-    <Tag className={`surface-card p-7 ${lift ? "lift" : ""} ${className}`}>
-      {children}
-    </Tag>
-  );
-}
-
-/* Panel: the single large surface used across the page */
-export function Panel({ children, className = "", padded = true }) {
-  return (
-    <div className={`surface-panel ${padded ? "p-7 sm:p-10 lg:p-12" : ""} ${className}`}>
-      {children}
-    </div>
-  );
-}
-
 /* Pill button with a circular arrow badge */
 export function Button({
   href = "#",
@@ -128,11 +110,18 @@ export function Button({
 }
 
 /* Text link with a small circular arrow */
-export function ArrowLink({ href = "#", children, tone = "light", className = "" }) {
+export function ArrowLink({
+  href = "#",
+  children,
+  tone = "light",
+  className = "",
+  newTab = false,
+}) {
   const dark = tone === "dark";
   return (
     <a
       href={href}
+      {...(newTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
       className={`group inline-flex items-center gap-2.5 text-sm font-medium transition-colors ${
         dark ? "text-on-emph hover:text-accent" : "text-ink hover:text-accent-ice"
       } ${className}`}
@@ -149,16 +138,6 @@ export function ArrowLink({ href = "#", children, tone = "light", className = ""
         <ArrowUpRight className="h-3.5 w-3.5" />
       </span>
     </a>
-  );
-}
-
-/* Small outlined chip */
-export function Chip({ children }) {
-  return (
-    <span className="inline-flex items-center gap-2 rounded-pill border border-line bg-paper px-4 py-2 text-xs text-body shadow-card">
-      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />
-      {children}
-    </span>
   );
 }
 

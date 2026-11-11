@@ -90,6 +90,9 @@ Run from the repository root.
 | `npm run build` | Build all three |
 | `npm run lint` | Lint all three |
 | `npm run typecheck` | TypeScript applications only |
+| `npm run test` | Both suites below |
+| `npm run test:api` | 216 integration checks against the running API |
+| `npm run test:e2e` | 47 checks, including a portal-vs-website alignment guard |
 | `npm run db:up` · `db:down` · `db:logs` | Database container |
 | `npm run db:migrate` · `db:seed` · `db:studio` | Schema and data |
 | `npm run db:reset` | Drop, re-migrate, re-seed. **Destroys all data** |
@@ -102,17 +105,51 @@ npm run build --workspace @polarsight/web
 
 ## How the pieces fit
 
-The admin portal and the public website both talk to the API, and
-neither holds a database credential.
+```
+Admin portal ─┐                      ┌─ enquiries, applications
+              ├─→  API  ─→  Database ┤
+Public site ──┘                      └─ published content
+```
 
-- **Public website** reads published content from the API at build and
-  revalidation time, and posts the contact form to it. Its own copy in
-  `apps/web/lib/content.js` remains as an offline fallback: if the API
-  is unreachable the site renders that copy instead, key by key, so a
-  backend outage cannot take the marketing site down.
-- **Admin portal** manages that content. Everything is created as a
-  draft and is invisible to the public site until published.
-- **API** owns the database, authentication and permissions.
+Both front ends talk to the same API, and neither holds a database
+credential.
+
+- **API** owns the database, authentication and permissions. Every
+  protected route checks a permission on the server; the portal hides
+  screens as a convenience, not as a control.
+- **Admin portal** manages everything the public site shows. Edits are
+  saved as drafts and are invisible to visitors until published.
+- **Public website** reads only published content, posts the contact
+  form and the trainer application form, and falls back to its own
+  built-in copy key by key when the API is unreachable — so a backend
+  outage cannot take the marketing site down.
+
+### Draft isolation
+
+A draft is not a hidden row. Editable content keeps its live value and
+its working draft in **separate database columns**, and no public
+endpoint selects the draft column or accepts a status from the caller.
+There is no query a visitor could make that returns unpublished work.
+
+Previewing a draft needs a signed, ten-minute token issued to an
+authenticated editor. Without one the preview route returns 404 — the
+same answer an unpublished page gives anybody else.
+
+### Publishing
+
+Publishing records a version, then asks the website to drop its cache
+so the change appears immediately. Without `REVALIDATE_SECRET` set it
+appears within a minute instead. Neither path needs a deploy.
+
+Restoring a version writes into the **draft**, never straight to the
+live value, so a rollback is reviewable before it reaches the site.
+
+### The homepage's first screen
+
+The hero, navigation, video and first-screen layout are not editable
+content. They have no region in the CMS and no row in the database,
+so nothing done in the admin portal can change them. This is enforced
+by the page schema on the server, not by convention.
 
 ## Documentation
 
@@ -120,7 +157,8 @@ neither holds a database credential.
 |---|---|
 | [docs/api.md](docs/api.md) | Every endpoint, permissions, rate limits |
 | [docs/database.md](docs/database.md) | Schema, migrations, conventions |
-| [docs/admin-setup.md](docs/admin-setup.md) | Roles, first sign-in, publishing |
+| [docs/admin-setup.md](docs/admin-setup.md) | Roles, first sign-in, publishing, every module |
+| [docs/environment.md](docs/environment.md) | Every environment variable, and a production checklist |
 | [docs/deployment.md](docs/deployment.md) | Going to production |
 | [requirements.md](requirements.md) | What this is and is not |
 | [task.md](task.md) | Phase-by-phase record of what was built and verified |
@@ -189,30 +227,85 @@ git init && git add . && git commit -m "POLARSIGHT monorepo"
 
 ## Project status
 
-All six phases are complete and verified. `task.md` records what was
-built in each, what was tested, and the defects found and fixed along
-the way.
+The platform is complete: the admin portal is the control panel for
+the public website, and every figure, list and page a visitor sees
+comes from the database.
 
-| Phase | State |
+| Area | State |
 |---|---|
-| 1. Monorepo restructure | Complete and verified |
-| 2. Database and Prisma schema | Complete and verified |
-| 3. Backend API | Complete and verified |
-| 4. Admin portal | Complete and verified |
-| 5. Public site integration | Complete and verified |
-| 6. Documentation and handover | Complete and verified |
+| Authentication, sessions, RBAC | Complete and verified |
+| Content management (pages, blocks, versioning) | Complete and verified |
+| Portal matches the website, field for field | Complete and verified |
+| Programmes and curriculum builder | Complete and verified |
+| Recruitment (openings, applications, pipeline) | Complete and verified |
+| Enquiry management | Complete and verified |
+| Media library | Complete and verified |
+| Settings and integration health | Complete and verified |
+| Audit logging | Complete and verified |
+| Public website integration | Complete and verified |
+
+**263 automated checks pass** — 216 integration and 47 end-to-end —
+run against the real API, the real database and the rendered website.
+
+```bash
+npm run test
+```
+
+### The portal mirrors the website
+
+Every screen and every field manages something the public site
+actually renders, and everything editable on the site is reachable
+from the portal. That correspondence is checked by the end-to-end
+suite: for each page it loads the rendered route and asserts that
+every heading the portal can edit appears on it.
+
+There is nothing in the portal without a matching section on the
+site, and nothing in the API without a screen. The modules behind the
+sections the site dropped — "who we serve", a FAQ list, standalone
+statistics, separate careers prose blocks — were removed with them,
+rather than left as endpoints serving empty lists.
+
+### Requires external configuration
+
+These are complete in code and need credentials or a service before
+they do anything in production. Each one says so plainly in the
+interface rather than failing silently.
+
+- **Object storage.** Uploads are written to the API instance's own
+  disk. That works, and it constrains the deployment: the directory
+  must be a persistent volume and only one instance may write to it.
+  `StorageDriver` is the whole surface a bucket-backed driver would
+  replace, and `STORAGE_DRIVER` accepts no value that is not
+  implemented. See [docs/deployment.md](docs/deployment.md).
+- **Outbound email.** Candidate and enquiry notifications are built and
+  templated. Set `SMTP_HOST` and `MAIL_FROM` to enable them. Until
+  then the API returns `{ sent: false, reason: "not_configured" }`, the
+  portal tells the administrator no message was sent, and the website
+  tells an applicant no confirmation could be sent. **Nothing claims a
+  message was delivered when it was not.**
+- **Contact details and social profiles.** Blank by default, on
+  purpose. A wrong address is worse than a missing one, so the site
+  omits any field that is not set. Fill them in under Settings.
 
 ### Known limitations
 
-- **Object storage is not implemented.** The media driver works on
-  local disk for development; the S3 driver is a stub that throws.
-  It must be written before deploying. See
-  [docs/deployment.md](docs/deployment.md).
-- **Statistics and audiences are unpublished drafts.** The figures
-  inherited from the old site are illustrative and must be replaced
-  with evidenced numbers before anyone publishes them.
-- **The admin bundle is one 596 KB chunk** (164 KB gzipped).
-  Acceptable for an internal tool; split by route if it ever drags.
+- **The admin bundle is one ~930 KB chunk** (221 KB gzipped).
+  Acceptable for an internal tool behind a sign-in; split by route if
+  it ever drags.
 - **Noisy logs during an API outage.** Next prints its own
   connection-refused trace per request on top of the single warning
   the content client emits. Behaviour is correct; the logs are ugly.
+
+## Security assessment
+
+Assessed against OWASP Top 10:2025 / ASVS 5.0 Level 2 on 2026-11-11;
+every finding fixed and retested. Audit report, vulnerability register,
+API inventory, upload pipeline, authentication design, test results,
+incident response, deployment checklist and configuration guide are in
+[docs/security/](docs/security/).
+
+```bash
+npm run test:security   # 94 active probes against the local stack
+npm run security:audit  # dependency advisories (CI blocks on moderate+)
+npm run security:sbom   # CycloneDX SBOM
+```

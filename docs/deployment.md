@@ -27,7 +27,8 @@ exits if any of these are wrong, which is intentional:
 - `COOKIE_SECURE` must be `true`.
 - `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` must differ, and each
   must be at least 32 characters.
-- `STORAGE_DRIVER` must not be `local`.
+- `CLAMAV_HOST` must be set: uploads cannot be scanned without it.
+- `MFA_ENCRYPTION_KEY` must be set.
 
 Generate secrets per environment. Never reuse them across
 environments, and never reuse the development values:
@@ -50,21 +51,30 @@ development values:
 | `COOKIE_SECURE` | `true` |
 | `COOKIE_DOMAIN` | Your real domain |
 | `CORS_ORIGINS` | Exact public and admin origins, nothing else |
-| `STORAGE_DRIVER` | `s3` |
-| `S3_*` | Real bucket credentials |
+| `STORAGE_LOCAL_DIR`, `STORAGE_PRIVATE_DIR` | Paths on a persistent volume |
+| `CLAMAV_HOST` | The clamd host (required) |
+| `MFA_ENCRYPTION_KEY` | Fresh 32-byte random value |
+| `TRUST_PROXY` | `true` (behind the reverse proxy) |
 | `API_URL` / `NEXT_PUBLIC_API_URL` / `VITE_API_URL` | Public API URL |
 
 Secrets belong in your platform's secret store, not in a file in the
 repository and not in the build image.
 
-## Object storage is not finished
+## Object storage is not implemented
 
-`apps/api/src/lib/storage.ts` defines a driver interface with a
-working local-disk implementation and an `S3Driver` stub that throws.
-The boundary exists so swapping it changes nothing else, but **the S3
-driver must be implemented before deploying**, because the local
-driver writes to the container filesystem and will lose every upload
-on restart.
+`apps/api/src/lib/storage.ts` defines a `StorageDriver` interface with
+one implementation: local disk. There is no bucket driver, and
+`STORAGE_DRIVER` accepts no value that would pretend otherwise.
+
+This constrains the deployment rather than blocking it:
+
+- `STORAGE_LOCAL_DIR` **must** be a persistent volume. A container
+  filesystem loses every upload on restart.
+- Exactly **one** API instance may write to it. Uploads are not
+  shared between instances, so this does not scale horizontally.
+
+Add a driver here before you need a second instance. Nothing outside
+that file has to change.
 
 ## Database
 
@@ -98,10 +108,12 @@ party, since `defaultSrc` is `'self'`.
 - [ ] Fresh secrets generated, different per environment
 - [ ] `COOKIE_SECURE=true` and a real `COOKIE_DOMAIN`
 - [ ] `CORS_ORIGINS` lists only the real origins
-- [ ] S3 driver implemented and bucket credentials set
+- [ ] `STORAGE_LOCAL_DIR` on a persistent volume, one writer only
 - [ ] Migrations applied with `db:deploy`
 - [ ] Seed run once; the seeded password changed immediately
 - [ ] Proxy forwards the client address
 - [ ] TLS terminated in front of all three units
 - [ ] Database backups configured and a restore tested
 - [ ] `.env` absent from the repository and from built images
+
+The full pre-deployment list is docs/security/DEPLOYMENT_SECURITY_CHECKLIST.md.

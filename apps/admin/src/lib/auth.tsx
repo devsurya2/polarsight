@@ -16,12 +16,20 @@ export interface CurrentUser {
   role: string;
   permissions: string[];
   lastLoginAt?: string | null;
+  mfaEnabled: boolean;
+  /** The role requires a second factor and this account has none yet. */
+  mfaSetupRequired: boolean;
+  recoveryCodesLeft?: number;
 }
+
+export type SignInResult = { mfaRequired: true; challenge: string } | { mfaRequired: false; user: CurrentUser };
 
 interface AuthValue {
   user: CurrentUser | null;
   loading: boolean;
-  signIn(email: string, password: string): Promise<void>;
+  signIn(email: string, password: string): Promise<SignInResult>;
+  /** Second step of sign-in, with the challenge from the first. */
+  completeMfa(challenge: string, code: string): Promise<CurrentUser>;
   signOut(): Promise<void>;
   /** True when the current user holds every listed permission. */
   can(...required: string[]): boolean;
@@ -59,9 +67,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setSessionLostHandler(null);
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const { user } = await api.post<{ user: CurrentUser }>("/auth/login", { email, password });
+  const signIn = useCallback(async (email: string, password: string): Promise<SignInResult> => {
+    const res = await api.post<{ user?: CurrentUser; mfaRequired?: boolean; challenge?: string }>(
+      "/auth/login",
+      { email, password }
+    );
+    if (res.mfaRequired && res.challenge) return { mfaRequired: true, challenge: res.challenge };
+    setUser(res.user!);
+    return { mfaRequired: false, user: res.user! };
+  }, []);
+
+  const completeMfa = useCallback(async (challenge: string, code: string) => {
+    const { user } = await api.post<{ user: CurrentUser }>("/auth/mfa/verify", { challenge, code });
     setUser(user);
+    return user;
   }, []);
 
   const signOut = useCallback(async () => {
@@ -78,12 +97,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       signIn,
+      completeMfa,
       signOut,
       can: (...required) => required.every((p) => held.has(p)),
       canAny: (...accepted) => accepted.some((p) => held.has(p)),
       refreshUser: load,
     };
-  }, [user, loading, signIn, signOut, load]);
+  }, [user, loading, signIn, completeMfa, signOut, load]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
