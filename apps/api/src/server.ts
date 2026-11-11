@@ -12,17 +12,7 @@ async function main() {
   const app = createApp();
 
   // Render supplies PORT dynamically. Use API_PORT for local development.
- const rawPort = process.env.PORT ?? String(env.API_PORT);
-
-logger.info(
-  {
-    renderPort: process.env.PORT,
-    apiPort: env.API_PORT,
-    selectedPort: rawPort,
-  },
-  "checking API port configuration"
-);
-
+ const rawPort = process.env.PORT?.trim() || String(env.API_PORT);
 const port = Number(rawPort);
 
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
