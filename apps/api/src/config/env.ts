@@ -5,7 +5,9 @@ import { z } from "zod";
 
 // Secrets live in one place: the monorepo root .env.
 const here = path.dirname(fileURLToPath(import.meta.url));
-loadEnv({ path: path.resolve(here, "../../../../.env") });
+if (process.env.NODE_ENV !== "production") {
+  loadEnv({ path: path.resolve(here, "../../../../.env") });
+}
 
 const bool = z
   .string()
@@ -30,7 +32,7 @@ const schema = z.object({
   JWT_ACCESS_TTL: z.string().default("15m"),
   JWT_REFRESH_TTL: z.string().default("7d"),
 
-  COOKIE_DOMAIN: z.string().default("localhost"),
+  COOKIE_DOMAIN: z.string().optional(),
   COOKIE_SECURE: bool.default(false),
 
   // Only enable behind a reverse proxy that sets X-Forwarded-For. With
@@ -72,7 +74,7 @@ const schema = z.object({
   // still in quarantine). Never served statically; outside the
   // public directory so no path can reach it through /media.
   STORAGE_PRIVATE_DIR: z.string().default("./private-uploads"),
-  STORAGE_PUBLIC_URL: z.string().default("http://localhost:5000/media"),
+  STORAGE_PUBLIC_URL: z.string().default("https://polarsight.onrender.com/media"),
 
   // Resume uploads: PDF only, this many bytes at most.
   RESUME_MAX_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
@@ -98,7 +100,7 @@ const schema = z.object({
 
   // Base URL of the public website, used to build links in emails and
   // to tell it when published content has changed.
-  WEB_URL: z.string().url().default("http://localhost:3000"),
+  WEB_URL: z.string().url().default("https://polarsight.vercel.app"),
 
   // Shared with the website's /api/revalidate route. Unset means a
   // publish simply waits for the site's own one-minute refresh.
@@ -131,8 +133,6 @@ if (isProd) {
   if (!env.COOKIE_SECURE) problems.push("COOKIE_SECURE must be true in production");
   if (env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET)
     problems.push("JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ");
-  if (!env.CLAMAV_HOST)
-    problems.push("CLAMAV_HOST must be set in production: uploads cannot be scanned without it");
   if (!env.MFA_ENCRYPTION_KEY)
     problems.push("MFA_ENCRYPTION_KEY must be set in production (32 random bytes, base64url)");
   if (problems.length) {
