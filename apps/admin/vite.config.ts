@@ -13,15 +13,26 @@ import path from "node:path";
  * browsers honour for everything except frame-ancestors.
  */
 function csp(dev: boolean, apiOrigin: string): string {
+  // The portal only ever calls a relative /api, which the dev server
+  // and the host's rewrite both proxy, so 'self' already covers it.
+  // Naming the API origin as well is a convenience for development.
+  // A loopback address must never survive into a production policy:
+  // it is meaningless to a visitor's browser and advertises how the
+  // build was configured, so it is dropped rather than inlined when
+  // VITE_API_URL has not been set in the deployment environment.
+  const extra = !dev && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(apiOrigin)
+    ? ""
+    : ` ${apiOrigin}`;
+
   return [
     "default-src 'self'",
     // React Fast Refresh injects an inline preamble in development only.
     `script-src 'self'${dev ? " 'unsafe-inline'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data: blob: ${apiOrigin}`,
+    `img-src 'self' data: blob:${extra}`,
     "font-src 'self' data:",
-    `connect-src 'self' ${apiOrigin}${dev ? " ws: wss:" : ""}`,
-    `media-src 'self' ${apiOrigin}`,
+    `connect-src 'self'${extra}${dev ? " ws: wss:" : ""}`,
+    `media-src 'self'${extra}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

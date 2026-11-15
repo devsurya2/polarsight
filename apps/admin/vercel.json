@@ -8,21 +8,28 @@
     "the browser then treats the session cookie as first-party, so the",
     "API's httpOnly + SameSite=Strict cookies are sent on every request",
     "and the CSRF guard's Origin check passes without weakening either.",
+    "The Render host therefore never appears in frontend source.",
     "",
     "In development Vite proxies /api and /media to the API. In",
     "production this file does the same job. Without it, /api/* resolves",
-    "to the static site itself and every call 404s, which is why sign-in",
-    "failed even though the backend was reachable.",
+    "to the static site itself and every call 404s with",
+    "x-vercel-error: NOT_FOUND, which is what broke sign-in.",
+    "",
+    "THIS FILE ONLY TAKES EFFECT IF THE VERCEL PROJECT'S ROOT DIRECTORY",
+    "IS apps/admin. At any other root Vercel never reads it and the",
+    "symptoms above return unchanged.",
     "",
     "The destination is literal: Vercel does not interpolate environment",
     "variables into rewrite destinations. If the API moves, change it",
-    "here and redeploy. VITE_API_URL still needs to match, because the",
-    "build bakes that origin into the admin's Content-Security-Policy.",
+    "here and redeploy.",
     "",
-    "Order matters. Vercel checks the filesystem before applying",
-    "rewrites, so real assets are served directly; /api and /media are",
-    "matched before the SPA fallback, which must stay last so a page",
-    "refresh on a client-side route still returns index.html."
+    "Ordering: Vercel checks the filesystem before applying rewrites, so",
+    "real files under /assets are served directly and never reach these",
+    "rules. /api and /media are matched first, and the SPA fallback is",
+    "additionally written as a negative lookahead so an API path cannot",
+    "be rewritten to index.html even if it were evaluated out of order.",
+    "That fallback must stay last so a refresh on a client-side route",
+    "still returns index.html."
   ],
 
   "rewrites": [
@@ -35,7 +42,7 @@
       "destination": "https://polarsight.onrender.com/media/:path*"
     },
     {
-      "source": "/:path*",
+      "source": "/((?!api/|media/).*)",
       "destination": "/index.html"
     }
   ]
