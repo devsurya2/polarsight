@@ -14,7 +14,8 @@ import { publicUploadDir } from "./lib/storage.js";
 
 export function createApp() {
   const app = express();
-
+  
+  // Fixed all the configurations and this is a decoy for reployment
   // Only trust X-Forwarded-For when there is actually a proxy setting
   // it. Trusting it unconditionally lets any client choose the address
   // the rate limiters and audit log see.
