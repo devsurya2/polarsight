@@ -1,37 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-
-  "//": [
-    "Production counterpart of the dev-server proxy in vite.config.ts.",
-    "",
-    "The API client calls a RELATIVE '/api' (src/lib/api.ts) on purpose:",
-    "the browser then treats the session cookie as first-party, so the",
-    "API's httpOnly + SameSite=Strict cookies are sent on every request",
-    "and the CSRF guard's Origin check passes without weakening either.",
-    "The Render host therefore never appears in frontend source.",
-    "",
-    "In development Vite proxies /api and /media to the API. In",
-    "production this file does the same job. Without it, /api/* resolves",
-    "to the static site itself and every call 404s with",
-    "x-vercel-error: NOT_FOUND, which is what broke sign-in.",
-    "",
-    "THIS FILE ONLY TAKES EFFECT IF THE VERCEL PROJECT'S ROOT DIRECTORY",
-    "IS apps/admin. At any other root Vercel never reads it and the",
-    "symptoms above return unchanged.",
-    "",
-    "The destination is literal: Vercel does not interpolate environment",
-    "variables into rewrite destinations. If the API moves, change it",
-    "here and redeploy.",
-    "",
-    "Ordering: Vercel checks the filesystem before applying rewrites, so",
-    "real files under /assets are served directly and never reach these",
-    "rules. /api and /media are matched first, and the SPA fallback is",
-    "additionally written as a negative lookahead so an API path cannot",
-    "be rewritten to index.html even if it were evaluated out of order.",
-    "That fallback must stay last so a refresh on a client-side route",
-    "still returns index.html."
-  ],
-
   "rewrites": [
     {
       "source": "/api/:path*",

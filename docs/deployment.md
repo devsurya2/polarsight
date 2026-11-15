@@ -19,6 +19,34 @@ The admin build is a static bundle. Serve it from any static host, with
 a rewrite sending unknown paths to `index.html` so client-side routing
 works on a refresh.
 
+### Admin routing on Vercel
+
+`apps/admin/vercel.json` is the production counterpart of the
+dev-server proxy in `vite.config.ts`. The API client calls a relative
+`/api` (`src/lib/api.ts`) deliberately: the browser then treats the
+session cookie as first-party, so the API's httpOnly `SameSite=Strict`
+cookies are sent on every request and the CSRF guard's Origin check
+passes without either being weakened. It also keeps the backend host
+out of the frontend bundle. The three rewrites send `/api` and `/media`
+to the API and everything else to `index.html`, in that order; the SPA
+fallback additionally excludes those two prefixes by negative
+lookahead so an API path can never be rewritten to `index.html`.
+
+Two things that bite:
+
+- **The file is read from the project's Root Directory.** With Root
+  Directory `apps/admin`, Vercel reads `apps/admin/vercel.json`. At any
+  other root it never sees the file, and `/login` 404s while `/` still
+  works.
+- **`vercel.json` is schema-validated, and unknown keys fail the
+  build.** The schema at `https://openapi.vercel.sh/vercel.json` sets
+  `additionalProperties: false`, so a `"//"` comment key — legal in
+  `package.json` — is rejected with *"should NOT have additional
+  property"*. A failed build is not a visible outage: Vercel keeps
+  serving the last successful deployment, so the symptom is routing
+  changes that silently never take effect. Keep the file minimal and
+  put the reasoning here instead.
+
 ## Before the first deploy
 
 The API refuses to start in production with unsafe configuration. It
