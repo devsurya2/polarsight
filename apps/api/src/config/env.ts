@@ -107,7 +107,22 @@ const schema = z.object({
   REVALIDATE_SECRET: z.string().optional(),
 });
 
-const parsed = schema.safeParse(process.env);
+/**
+ * A variable present but empty means "not set", not "set to nothing".
+ *
+ * Hosting dashboards and .env files produce `FOO=` readily, and Zod
+ * treats that empty string as a real value: `.default()` never fires,
+ * so `API_PORT=` coerces to 0 and fails `.positive()`, aborting the
+ * boot, while `MFA_REQUIRED_ROLES=` parses to an empty list and
+ * silently switches off a requirement that should have defaulted on.
+ * Stripping empties first makes an empty variable behave exactly like
+ * an absent one, which is what every one of these defaults assumes.
+ */
+const present = Object.fromEntries(
+  Object.entries(process.env).filter(([, v]) => v !== undefined && v.trim() !== "")
+);
+
+const parsed = schema.safeParse(present);
 
 if (!parsed.success) {
   const issues = parsed.error.issues
@@ -122,9 +137,22 @@ export const env = parsed.data;
 export const isProd = env.NODE_ENV === "production";
 export const isDev = env.NODE_ENV === "development";
 
-/** Resolved MFA policy: explicit setting, else Super Admin in production only. */
+/**
+ * Resolved MFA policy: the explicit setting, else Super Admin in
+ * production only.
+ *
+ * Unset now means "use the default" (an empty value is stripped
+ * above), so turning the requirement off has to be deliberate:
+ * `MFA_REQUIRED_ROLES=none`. That is worth the extra word — a blank
+ * variable disabling a second factor is precisely the kind of quiet
+ * downgrade this file exists to prevent.
+ */
 export const MFA_REQUIRED_ROLES: readonly string[] =
-  env.MFA_REQUIRED_ROLES ?? (isProd ? ["Super Admin"] : []);
+  env.MFA_REQUIRED_ROLES === null
+    ? isProd
+      ? ["Super Admin"]
+      : []
+    : env.MFA_REQUIRED_ROLES.filter((r) => r.toLowerCase() !== "none");
 
 // A production boot with development defaults is a security incident
 // waiting to happen, so refuse it outright.

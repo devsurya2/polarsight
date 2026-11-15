@@ -1,0 +1,42 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "//": [
+    "Production counterpart of the dev-server proxy in vite.config.ts.",
+    "",
+    "The API client calls a RELATIVE '/api' (src/lib/api.ts) on purpose:",
+    "the browser then treats the session cookie as first-party, so the",
+    "API's httpOnly + SameSite=Strict cookies are sent on every request",
+    "and the CSRF guard's Origin check passes without weakening either.",
+    "",
+    "In development Vite proxies /api and /media to the API. In",
+    "production this file does the same job. Without it, /api/* resolves",
+    "to the static site itself and every call 404s, which is why sign-in",
+    "failed even though the backend was reachable.",
+    "",
+    "The destination is literal: Vercel does not interpolate environment",
+    "variables into rewrite destinations. If the API moves, change it",
+    "here and redeploy. VITE_API_URL still needs to match, because the",
+    "build bakes that origin into the admin's Content-Security-Policy.",
+    "",
+    "Order matters. Vercel checks the filesystem before applying",
+    "rewrites, so real assets are served directly; /api and /media are",
+    "matched before the SPA fallback, which must stay last so a page",
+    "refresh on a client-side route still returns index.html."
+  ],
+
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://polarsight.onrender.com/api/:path*"
+    },
+    {
+      "source": "/media/:path*",
+      "destination": "https://polarsight.onrender.com/media/:path*"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
+    }
+  ]
+}

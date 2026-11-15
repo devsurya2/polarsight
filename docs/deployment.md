@@ -27,8 +27,39 @@ exits if any of these are wrong, which is intentional:
 - `COOKIE_SECURE` must be `true`.
 - `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` must differ, and each
   must be at least 32 characters.
-- `CLAMAV_HOST` must be set: uploads cannot be scanned without it.
 - `MFA_ENCRYPTION_KEY` must be set.
+
+A variable that is present but empty counts as unset, so `FOO=` in a
+hosting dashboard gets the documented default rather than coercing to
+zero or to an empty list.
+
+## Apply the schema before the first start
+
+**The API boots fine against an empty database.** Its startup check is
+`SELECT 1`, which needs no tables, so a missing schema does not
+announce itself: `/health` returns 200 and every route that touches a
+table returns 500. Sign-in fails with `INTERNAL_ERROR` because
+`admin_users` does not exist.
+
+Migrations are therefore a deploy step, not a one-off someone
+remembers:
+
+```bash
+npm run db:deploy --workspace @polarsight/api   # prisma migrate deploy
+npm run db:seed   --workspace @polarsight/api   # first administrator, idempotent
+```
+
+Both read `DATABASE_URL` from the process environment; the `dotenv`
+wrapper in those scripts silently does nothing when there is no local
+`.env`, which is what makes them safe to run on a host. Wire
+`db:deploy` into the platform's pre-deploy or release phase so it runs
+on every deploy, and run `db:seed` once.
+
+`db:seed` creates the first administrator from `SEED_ADMIN_EMAIL` and
+`SEED_ADMIN_PASSWORD`. It upserts, and **never changes the password of
+an account that already exists** — so re-running it is safe, and
+changing those variables later does not reset a password. Use
+Administrators → Reset password for that.
 
 Generate secrets per environment. Never reuse them across
 environments, and never reuse the development values:
