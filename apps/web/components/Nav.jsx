@@ -19,7 +19,7 @@ export function Nav({ nav = staticNav }) {
   const pathname = usePathname();
 
   /* Active state follows the route. Entries that are only an anchor
-     never claim it, so "Contact us" does not fight "Home". */
+     never claim it, so an on-page link does not fight "Home". */
   const isActive = (item) => {
     if (item.href.includes("#")) return false;
     if (item.href === "/") return pathname === "/";

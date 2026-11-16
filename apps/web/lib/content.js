@@ -36,7 +36,9 @@ export const nav = [
   { label: "Outcomes", href: "/outcomes" },
   { label: "About us", href: "/about", newTab: true },
   { label: "Careers", href: "/careers", newTab: true },
-  { label: "Contact us", href: "/contact" },
+  // Contact is deliberately absent: it is the navbar's call to action
+  // (the white pill in Nav.jsx), not a text link. Adding it back here
+  // puts "Contact us" in the menu twice, once in each layout.
 ];
 
 // The homepage's first screen. Each field below has a matching
