@@ -18,6 +18,31 @@ const API_URL =
 
 const isProd = process.env.NODE_ENV === "production";
 
+/*
+ * A production build must not keep the development fallback.
+ *
+ * The whole site renders fine with it — only the forms break, and
+ * they break in a way that reads like an application fault rather
+ * than a missing variable. The `/api/*` rewrite below would resolve
+ * to a loopback address, which Vercel refuses to proxy: it answers
+ * 404 with `x-vercel-error: DNS_HOSTNAME_RESOLVED_PRIVATE`, and the
+ * forms surface that as "HTTP 404" and "Something went wrong at our
+ * end". Nothing reaches the API, so nothing is logged there either.
+ *
+ * Failing the build is the cheaper failure: one missing environment
+ * variable, caught at deploy time, instead of a contact form that
+ * silently drops every enquiry in production.
+ */
+if (isProd && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:|\/|$)/i.test(API_URL)) {
+  throw new Error(
+    `API_URL resolves to ${API_URL} in a production build.\n` +
+      "Vercel will not proxy /api/* to a private address, so every form " +
+      "submission would return 404.\n" +
+      "Set API_URL (or NEXT_PUBLIC_API_URL) to the public API origin in the " +
+      "deployment environment, for example https://polarsight.onrender.com"
+  );
+}
+
 /* Public contact details, inlined at build time.
    Listed explicitly rather than filtered out of process.env, so it is
    obvious from this file exactly what reaches the browser bundle. An
